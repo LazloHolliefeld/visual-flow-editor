@@ -1,0 +1,439 @@
+/* Visual Flow Editor Styles */
+
+.app-container {
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.flow-container {
+  flex: 1;
+  width: 100%;
+}
+
+/* Panel Styles */
+.node-palette {
+  background: #1e1e1e;
+  padding: 15px;
+  border-radius: 8px;
+  border: 1px solid #333;
+}
+
+.node-palette h3 {
+  margin: 0 0 10px 0;
+  color: #fff;
+  font-size: 14px;
+}
+
+.node-palette button {
+  display: block;
+  width: 100%;
+  padding: 8px 12px;
+  margin: 5px 0;
+  background: #2d2d2d;
+  border: 1px solid #444;
+  border-radius: 4px;
+  color: #fff;
+  cursor: pointer;
+  text-align: left;
+  font-size: 13px;
+  transition: background 0.2s;
+}
+
+.node-palette button:hover {
+  background: #3d3d3d;
+  border-color: #666;
+}
+
+.info-panel {
+  background: #1e1e1e;
+  padding: 15px;
+  border-radius: 8px;
+  border: 1px solid #333;
+  color: #ccc;
+}
+
+.info-panel h3 {
+  margin: 0 0 10px 0;
+  color: #fff;
+  font-size: 14px;
+}
+
+.info-panel p {
+  margin: 5px 0;
+  font-size: 12px;
+}
+
+/* Node Base Styles */
+.node-label {
+  font-weight: bold;
+  font-size: 12px;
+  text-align: center;
+}
+
+.node-condition,
+.node-code,
+.node-url {
+  font-size: 10px;
+  color: #aaa;
+  margin-top: 4px;
+  text-align: center;
+}
+
+/* Decision Node - Diamond */
+.decision-node {
+  position: relative;
+}
+
+.diamond-shape {
+  width: 100px;
+  height: 100px;
+  background: #4a9eff;
+  transform: rotate(45deg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid #2d7dd2;
+}
+
+.diamond-shape .node-content {
+  transform: rotate(-45deg);
+  padding: 10px;
+}
+
+/* Action Node - Rectangle */
+.action-node .rectangle-shape {
+  background: #50c878;
+  padding: 15px 25px;
+  border-radius: 4px;
+  border: 2px solid #3da35d;
+  min-width: 100px;
+}
+
+/* Start/End Node - Oval */
+.start-end-node .oval-shape {
+  background: #ff6b6b;
+  padding: 15px 30px;
+  border-radius: 25px;
+  border: 2px solid #cc5555;
+  min-width: 80px;
+}
+
+.start-end-node.start .oval-shape {
+  background: #50c878;
+  border-color: #3da35d;
+}
+
+/* API Call Node - Parallelogram */
+.api-call-node .parallelogram-shape {
+  background: #ffa500;
+  padding: 15px 25px;
+  border: 2px solid #cc8400;
+  transform: skewX(-10deg);
+  min-width: 100px;
+}
+
+.api-call-node .parallelogram-shape > * {
+  transform: skewX(10deg);
+}
+
+/* Loop Node - Hexagon */
+.loop-node .hexagon-shape {
+  background: #9b59b6;
+  padding: 15px 25px;
+  clip-path: polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%);
+  min-width: 120px;
+  min-height: 60px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+/* React Flow Handle Styles */
+.react-flow__handle {
+  width: 10px;
+  height: 10px;
+  background: #555;
+  border: 2px solid #fff;
+}
+
+.react-flow__handle:hover {
+  background: #888;
+}
+
+/* Edge Labels */
+.react-flow__edge-text {
+  font-size: 10px;
+  fill: #fff;
+}
+
+/* Database Node - Cylinder */
+.database-node {
+  position: relative;
+  cursor: pointer;
+}
+
+.cylinder-shape {
+  width: 100px;
+  position: relative;
+}
+
+.cylinder-top {
+  width: 100px;
+  height: 20px;
+  background: #3498db;
+  border-radius: 50%;
+  border: 2px solid #2980b9;
+  position: relative;
+  z-index: 2;
+}
+
+.cylinder-body {
+  width: 96px;
+  margin: 0 2px;
+  margin-top: -10px;
+  padding: 20px 10px 15px;
+  background: linear-gradient(to right, #2980b9, #3498db, #2980b9);
+  border-left: 2px solid #2980b9;
+  border-right: 2px solid #2980b9;
+  text-align: center;
+  min-height: 40px;
+}
+
+.cylinder-bottom {
+  width: 100px;
+  height: 20px;
+  background: #2980b9;
+  border-radius: 50%;
+  border: 2px solid #2980b9;
+  margin-top: -10px;
+  position: relative;
+  z-index: 1;
+}
+
+.database-node .node-label {
+  color: #fff;
+  font-weight: bold;
+  font-size: 11px;
+}
+
+.database-node .node-detail {
+  color: #e0e0e0;
+  font-size: 9px;
+  margin-top: 3px;
+}
+
+.database-node .config-hint {
+  font-size: 8px;
+  color: #888;
+  text-align: center;
+  margin-top: 5px;
+}
+
+/* Database Config Modal */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal-content {
+  background: #2d2d2d;
+  border-radius: 8px;
+  padding: 20px;
+  min-width: 500px;
+  max-width: 800px;
+  max-height: 80vh;
+  overflow-y: auto;
+  border: 1px solid #444;
+}
+
+.modal-content h2 {
+  margin: 0 0 20px 0;
+  color: #fff;
+  font-size: 18px;
+  border-bottom: 1px solid #444;
+  padding-bottom: 10px;
+}
+
+.modal-content h3 {
+  margin: 15px 0 10px 0;
+  color: #ccc;
+  font-size: 14px;
+}
+
+.form-group {
+  margin-bottom: 15px;
+}
+
+.form-group label {
+  display: block;
+  color: #aaa;
+  font-size: 12px;
+  margin-bottom: 5px;
+}
+
+.form-group input,
+.form-group select {
+  width: 100%;
+  padding: 8px 12px;
+  background: #1e1e1e;
+  border: 1px solid #444;
+  border-radius: 4px;
+  color: #fff;
+  font-size: 13px;
+}
+
+.form-group input:focus,
+.form-group select:focus {
+  outline: none;
+  border-color: #3498db;
+}
+
+.form-row {
+  display: flex;
+  gap: 15px;
+}
+
+.form-row .form-group {
+  flex: 1;
+}
+
+.table-editor {
+  background: #1e1e1e;
+  border-radius: 4px;
+  padding: 15px;
+  margin-top: 10px;
+}
+
+.table-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.table-header h4 {
+  margin: 0;
+  color: #fff;
+  font-size: 13px;
+}
+
+.column-row {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 8px;
+  align-items: center;
+}
+
+.column-row input {
+  flex: 1;
+  padding: 6px 10px;
+  background: #2d2d2d;
+  border: 1px solid #444;
+  border-radius: 4px;
+  color: #fff;
+  font-size: 12px;
+}
+
+.column-row select {
+  width: 120px;
+  padding: 6px 10px;
+  background: #2d2d2d;
+  border: 1px solid #444;
+  border-radius: 4px;
+  color: #fff;
+  font-size: 12px;
+}
+
+.column-row input[type="checkbox"] {
+  width: auto;
+  flex: none;
+}
+
+.btn {
+  padding: 8px 16px;
+  border-radius: 4px;
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  transition: background 0.2s;
+}
+
+.btn-primary {
+  background: #3498db;
+  color: #fff;
+}
+
+.btn-primary:hover {
+  background: #2980b9;
+}
+
+.btn-secondary {
+  background: #444;
+  color: #fff;
+}
+
+.btn-secondary:hover {
+  background: #555;
+}
+
+.btn-danger {
+  background: #e74c3c;
+  color: #fff;
+}
+
+.btn-danger:hover {
+  background: #c0392b;
+}
+
+.btn-success {
+  background: #27ae60;
+  color: #fff;
+}
+
+.btn-success:hover {
+  background: #219a52;
+}
+
+.btn-small {
+  padding: 4px 8px;
+  font-size: 11px;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 20px;
+  padding-top: 15px;
+  border-top: 1px solid #444;
+}
+
+.status-message {
+  padding: 10px;
+  border-radius: 4px;
+  margin-bottom: 15px;
+  font-size: 13px;
+}
+
+.status-message.success {
+  background: rgba(39, 174, 96, 0.2);
+  color: #27ae60;
+  border: 1px solid #27ae60;
+}
+
+.status-message.error {
+  background: rgba(231, 76, 60, 0.2);
+  color: #e74c3c;
+  border: 1px solid #e74c3c;
+}

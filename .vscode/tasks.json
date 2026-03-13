@@ -1,0 +1,61 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Dev Server",
+      "type": "shell",
+      "command": "npm run dev",
+      "options": {
+        "cwd": "${workspaceFolder}/visual-flow-editor"
+      },
+      "problemMatcher": [],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      },
+      "isBackground": true
+    },
+    {
+      "label": "Frontend Only",
+      "type": "shell",
+      "command": "npm run dev:frontend",
+      "options": {
+        "cwd": "${workspaceFolder}/visual-flow-editor"
+      },
+      "problemMatcher": [],
+      "isBackground": true
+    },
+    {
+      "label": "Backend Only",
+      "type": "shell",
+      "command": "npm run dev:server",
+      "options": {
+        "cwd": "${workspaceFolder}/visual-flow-editor"
+      },
+      "problemMatcher": [],
+      "isBackground": true
+    },
+    {
+      "label": "Install Dependencies",
+      "type": "shell",
+      "command": "npm install && cd server && npm install",
+      "options": {
+        "cwd": "${workspaceFolder}/visual-flow-editor"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Build",
+      "type": "shell",
+      "command": "npm run build",
+      "options": {
+        "cwd": "${workspaceFolder}/visual-flow-editor"
+      },
+      "problemMatcher": []
+    }
+  ]
+}
