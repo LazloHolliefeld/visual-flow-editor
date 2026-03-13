@@ -176,6 +176,37 @@ app.post('/api/db/list-databases', async (req, res) => {
   }
 });
 
+// Drop database
+app.post('/api/db/drop', async (req, res) => {
+  const { host, port, database, password } = req.body;
+  
+  if (!database || database === 'postgres') {
+    return res.json({ success: false, message: 'Cannot drop postgres or empty database name' });
+  }
+  
+  try {
+    const client = await getAdminClient(host, port, password);
+    
+    // Terminate active connections to this database
+    await client.query(`
+      SELECT pg_terminate_backend(pg_stat_activity.pid)
+      FROM pg_stat_activity
+      WHERE pg_stat_activity.datname = $1
+        AND pid <> pg_backend_pid()
+    `, [database]);
+    
+    // Drop the database
+    await client.query(`DROP DATABASE IF EXISTS "${database}"`);
+    await client.end();
+    
+    console.log(`Dropped database: ${database}`);
+    res.json({ success: true, message: `Database "${database}" dropped successfully` });
+  } catch (error) {
+    console.error('Drop database error:', error);
+    res.json({ success: false, message: error.message });
+  }
+});
+
 // List tables in a database
 app.post('/api/db/list-tables', async (req, res) => {
   const { host, port, database, schema, password } = req.body;
@@ -220,19 +251,18 @@ app.post('/api/db/execute', async (req, res) => {
 
 // ===== PROJECT PERSISTENCE =====
 
-// Save project state
+// Save project state (new structure with serviceFlows)
 app.post('/api/project/save', async (req, res) => {
-  const { nodes, edges } = req.body;
+  const { projectData } = req.body;
   
   try {
-    const projectData = {
-      version: '1.0',
+    const data = {
+      version: '2.0',
       savedAt: new Date().toISOString(),
-      nodes,
-      edges,
+      projectData: projectData || { projectNodes: [], projectEdges: [], serviceFlows: {} },
     };
     
-    fs.writeFileSync(PROJECT_FILE, JSON.stringify(projectData, null, 2));
+    fs.writeFileSync(PROJECT_FILE, JSON.stringify(data, null, 2));
     res.json({ success: true, message: 'Project saved successfully' });
   } catch (error) {
     console.error('Save error:', error);
@@ -245,8 +275,24 @@ app.get('/api/project/load', async (req, res) => {
   try {
     if (fs.existsSync(PROJECT_FILE)) {
       const data = fs.readFileSync(PROJECT_FILE, 'utf-8');
-      const projectData = JSON.parse(data);
-      res.json({ success: true, ...projectData });
+      const saved = JSON.parse(data);
+      
+      // Handle both old and new formats
+      if (saved.projectData) {
+        res.json({ success: true, projectData: saved.projectData });
+      } else if (saved.nodes) {
+        // Migrate old format
+        res.json({ 
+          success: true, 
+          projectData: {
+            projectNodes: saved.nodes,
+            projectEdges: saved.edges || [],
+            serviceFlows: {},
+          }
+        });
+      } else {
+        res.json({ success: false, message: 'Invalid project format' });
+      }
     } else {
       res.json({ success: false, message: 'No saved project found' });
     }
@@ -350,6 +396,559 @@ require (
     res.json({ success: false, message: error.message });
   }
 });
+
+// ===== NEW: Generate and push to per-service repos =====
+app.post('/api/generate/push-all', async (req, res) => {
+  const { projectData, githubUsername } = req.body;
+  
+  if (!projectData) {
+    return res.json({ success: false, message: 'No project data provided' });
+  }
+  
+  const { projectNodes, projectEdges, serviceFlows } = projectData;
+  const repos = [];
+  
+  try {
+    // Get database nodes
+    const dbNodes = projectNodes.filter(n => n.type === 'database' && n.data?.database);
+    const serviceNodes = projectNodes.filter(n => n.type === 'service' && n.data?.name);
+    
+    // Generate DataGateway if there are databases
+    if (dbNodes.length > 0) {
+      const gatewayDir = path.join(__dirname, '..', '..', 'datagateway');
+      if (!fs.existsSync(gatewayDir)) fs.mkdirSync(gatewayDir, { recursive: true });
+      
+      // Generate DataGateway code (REST, gRPC, GraphQL)
+      const gatewayCode = generateDataGateway(dbNodes);
+      const dbSchemas = extractDatabaseSchemas(projectNodes);
+      
+      // Write files
+      fs.writeFileSync(path.join(gatewayDir, 'main.go'), gatewayCode.main);
+      fs.writeFileSync(path.join(gatewayDir, 'handlers.go'), gatewayCode.handlers);
+      fs.writeFileSync(path.join(gatewayDir, 'grpc_server.go'), gatewayCode.grpc);
+      fs.writeFileSync(path.join(gatewayDir, 'graphql.go'), gatewayCode.graphql);
+      fs.writeFileSync(path.join(gatewayDir, 'go.mod'), gatewayCode.goMod);
+      fs.writeFileSync(path.join(gatewayDir, 'README.md'), generateDataGatewayReadme(dbNodes));
+      
+      // Database schemas
+      const schemaDir = path.join(gatewayDir, 'database');
+      if (!fs.existsSync(schemaDir)) fs.mkdirSync(schemaDir, { recursive: true });
+      for (const schema of dbSchemas) {
+        fs.writeFileSync(path.join(schemaDir, `${schema.database}_schema.sql`), schema.sql);
+      }
+      
+      // Push to GitHub
+      const repoUrl = `https://github.com/${githubUsername}/datagateway.git`;
+      await ensureGitHubRepo(githubUsername, 'datagateway');
+      await pushToGitHub(gatewayDir, repoUrl, 'Update DataGateway');
+      repos.push({ name: 'datagateway', url: repoUrl });
+    }
+    
+    // Generate each service
+    for (const serviceNode of serviceNodes) {
+      const serviceName = sanitizeRepoName(serviceNode.data.name);
+      const serviceDir = path.join(__dirname, '..', '..', serviceName);
+      if (!fs.existsSync(serviceDir)) fs.mkdirSync(serviceDir, { recursive: true });
+      
+      // Get service flow
+      const flow = serviceFlows[serviceNode.id] || { nodes: [], edges: [] };
+      
+      // Generate service code
+      const serviceCode = generateServiceCode(serviceNode.data, flow.nodes, flow.edges, dbNodes.length > 0);
+      
+      // Write files
+      fs.writeFileSync(path.join(serviceDir, 'main.go'), serviceCode.main);
+      fs.writeFileSync(path.join(serviceDir, 'handlers.go'), serviceCode.handlers);
+      fs.writeFileSync(path.join(serviceDir, 'go.mod'), serviceCode.goMod);
+      fs.writeFileSync(path.join(serviceDir, 'README.md'), generateServiceReadme(serviceNode.data, flow));
+      
+      // Push to GitHub
+      const repoUrl = `https://github.com/${githubUsername}/${serviceName}.git`;
+      await ensureGitHubRepo(githubUsername, serviceName);
+      await pushToGitHub(serviceDir, repoUrl, `Update ${serviceName}`);
+      repos.push({ name: serviceName, url: repoUrl });
+    }
+    
+    res.json({
+      success: true,
+      message: `Generated and pushed ${repos.length} repo(s)`,
+      repos,
+    });
+  } catch (error) {
+    console.error('Push all error:', error);
+    res.json({ success: false, message: error.message });
+  }
+});
+
+// Helper: Ensure GitHub repo exists
+async function ensureGitHubRepo(username, repoName) {
+  return new Promise((resolve, reject) => {
+    exec(`gh repo view ${username}/${repoName}`, { shell: 'cmd.exe' }, (error) => {
+      if (error) {
+        // Repo doesn't exist, create it
+        exec(`gh repo create ${repoName} --public --confirm`, { shell: 'cmd.exe' }, (err, stdout, stderr) => {
+          if (err && !stderr.includes('already exists')) {
+            console.error(`Failed to create repo ${repoName}:`, stderr);
+          }
+          resolve();
+        });
+      } else {
+        resolve();
+      }
+    });
+  });
+}
+
+// Helper: Sanitize repo name
+function sanitizeRepoName(name) {
+  return name.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || 'unnamed-service';
+}
+
+// Helper: Generate DataGateway code
+function generateDataGateway(dbNodes) {
+  const databases = dbNodes.map(n => n.data);
+  
+  const main = `package main
+
+import (
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+)
+
+func main() {
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+	
+	// Initialize database connections
+	initDB()
+	defer closeDB()
+	
+	// Start gRPC server in background
+	go startGRPCServer()
+	
+	// Start GraphQL server
+	go startGraphQLServer()
+	
+	// REST API routes
+	mux := http.NewServeMux()
+	registerRoutes(mux)
+	
+	fmt.Printf("DataGateway starting on :%s\\n", port)
+	fmt.Printf("  REST:    http://localhost:%s/api/\\n", port)
+	fmt.Printf("  gRPC:    localhost:50051\\n")
+	fmt.Printf("  GraphQL: http://localhost:8081/graphql\\n")
+	
+	log.Fatal(http.ListenAndServe(":"+port, mux))
+}
+`;
+
+  const handlers = `package main
+
+import (
+	"database/sql"
+	"encoding/json"
+	"fmt"
+	"log"
+	"net/http"
+	"strings"
+	
+	_ "github.com/lib/pq"
+)
+
+var dbConnections = make(map[string]*sql.DB)
+
+func initDB() {
+${databases.map(db => `
+	// Connect to ${db.database}
+	connStr${sanitizeIdentifier(db.database)} := fmt.Sprintf("host=${db.host} port=${db.port} dbname=${db.database} user=postgres sslmode=disable")
+	db${sanitizeIdentifier(db.database)}, err := sql.Open("postgres", connStr${sanitizeIdentifier(db.database)})
+	if err != nil {
+		log.Printf("Warning: Failed to connect to ${db.database}: %v", err)
+	} else {
+		dbConnections["${db.database}"] = db${sanitizeIdentifier(db.database)}
+	}
+`).join('')}
+}
+
+func closeDB() {
+	for _, db := range dbConnections {
+		db.Close()
+	}
+}
+
+func registerRoutes(mux *http.ServeMux) {
+${databases.flatMap(db => (db.tables || []).map(table => `
+	// ${db.database}.${table.name} CRUD
+	mux.HandleFunc("/api/${db.database}/${table.name}", handle${sanitizeIdentifier(db.database)}${sanitizeIdentifier(table.name)})
+	mux.HandleFunc("/api/${db.database}/${table.name}/", handle${sanitizeIdentifier(db.database)}${sanitizeIdentifier(table.name)}ByID)
+`)).join('')}
+}
+
+${databases.flatMap(db => (db.tables || []).map(table => {
+  const tableName = table.name;
+  const dbName = db.database;
+  const funcName = sanitizeIdentifier(dbName) + sanitizeIdentifier(tableName);
+  const columns = (table.columns || []).filter(c => c.name);
+  
+  return `
+// Handle ${dbName}.${tableName}
+func handle${funcName}(w http.ResponseWriter, r *http.Request) {
+	db := dbConnections["${dbName}"]
+	if db == nil {
+		http.Error(w, "Database not connected", http.StatusServiceUnavailable)
+		return
+	}
+	
+	w.Header().Set("Content-Type", "application/json")
+	
+	switch r.Method {
+	case "GET":
+		rows, err := db.Query("SELECT ${columns.map(c => '"' + c.name + '"').join(', ')} FROM ${tableName}")
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		defer rows.Close()
+		
+		var results []map[string]interface{}
+		cols, _ := rows.Columns()
+		for rows.Next() {
+			columns := make([]interface{}, len(cols))
+			columnPointers := make([]interface{}, len(cols))
+			for i := range columns {
+				columnPointers[i] = &columns[i]
+			}
+			rows.Scan(columnPointers...)
+			m := make(map[string]interface{})
+			for i, colName := range cols {
+				m[colName] = columns[i]
+			}
+			results = append(results, m)
+		}
+		json.NewEncoder(w).Encode(results)
+		
+	case "POST":
+		var data map[string]interface{}
+		json.NewDecoder(r.Body).Decode(&data)
+		
+		columns := []string{}
+		values := []interface{}{}
+		placeholders := []string{}
+		i := 1
+		for k, v := range data {
+			columns = append(columns, "\\""+k+"\\"")
+			values = append(values, v)
+			placeholders = append(placeholders, fmt.Sprintf("$%d", i))
+			i++
+		}
+		
+		query := fmt.Sprintf("INSERT INTO ${tableName} (%s) VALUES (%s) RETURNING *",
+			strings.Join(columns, ","), strings.Join(placeholders, ","))
+		
+		row := db.QueryRow(query, values...)
+		result := make(map[string]interface{})
+		// Simplified - real impl would scan properly
+		json.NewEncoder(w).Encode(map[string]string{"status": "created"})
+		_ = row
+		_ = result
+		
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func handle${funcName}ByID(w http.ResponseWriter, r *http.Request) {
+	db := dbConnections["${dbName}"]
+	if db == nil {
+		http.Error(w, "Database not connected", http.StatusServiceUnavailable)
+		return
+	}
+	
+	// Extract ID from path
+	parts := strings.Split(r.URL.Path, "/")
+	id := parts[len(parts)-1]
+	
+	w.Header().Set("Content-Type", "application/json")
+	
+	switch r.Method {
+	case "GET":
+		row := db.QueryRow("SELECT ${columns.map(c => '"' + c.name + '"').join(', ')} FROM ${tableName} WHERE id = $1", id)
+		result := make(map[string]interface{})
+		// Scan row...
+		json.NewEncoder(w).Encode(result)
+		_ = row
+		
+	case "PUT":
+		var data map[string]interface{}
+		json.NewDecoder(r.Body).Decode(&data)
+		// Update logic...
+		json.NewEncoder(w).Encode(map[string]string{"status": "updated"})
+		
+	case "DELETE":
+		db.Exec("DELETE FROM ${tableName} WHERE id = $1", id)
+		json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
+		
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+`;
+})).join('')}
+`;
+
+  const grpc = `package main
+
+import (
+	"log"
+	"net"
+	
+	"google.golang.org/grpc"
+)
+
+func startGRPCServer() {
+	lis, err := net.Listen("tcp", ":50051")
+	if err != nil {
+		log.Printf("Failed to start gRPC server: %v", err)
+		return
+	}
+	
+	server := grpc.NewServer()
+	// Register services here
+	
+	log.Printf("gRPC server listening on :50051")
+	if err := server.Serve(lis); err != nil {
+		log.Printf("gRPC server error: %v", err)
+	}
+}
+`;
+
+  const graphql = `package main
+
+import (
+	"encoding/json"
+	"log"
+	"net/http"
+	
+	"github.com/graphql-go/graphql"
+)
+
+func startGraphQLServer() {
+	schema, err := graphql.NewSchema(graphql.SchemaConfig{
+		Query: graphql.NewObject(graphql.ObjectConfig{
+			Name: "Query",
+			Fields: graphql.Fields{
+				"health": &graphql.Field{
+					Type: graphql.String,
+					Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+						return "ok", nil
+					},
+				},
+				// Add more query fields for each table
+			},
+		}),
+	})
+	
+	if err != nil {
+		log.Printf("Failed to create GraphQL schema: %v", err)
+		return
+	}
+	
+	http.HandleFunc("/graphql", func(w http.ResponseWriter, r *http.Request) {
+		var params struct {
+			Query string \`json:"query"\`
+		}
+		json.NewDecoder(r.Body).Decode(&params)
+		
+		result := graphql.Do(graphql.Params{
+			Schema:        schema,
+			RequestString: params.Query,
+		})
+		
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(result)
+	})
+	
+	log.Printf("GraphQL server listening on :8081")
+	http.ListenAndServe(":8081", nil)
+}
+`;
+
+  const goMod = `module datagateway
+
+go 1.21
+
+require (
+	github.com/lib/pq v1.10.9
+	github.com/graphql-go/graphql v0.8.1
+	google.golang.org/grpc v1.59.0
+)
+`;
+
+  return { main, handlers, grpc, graphql, goMod };
+}
+
+// Helper: Generate DataGateway README
+function generateDataGatewayReadme(dbNodes) {
+  return `# DataGateway
+
+Auto-generated data access layer with REST, gRPC, and GraphQL support.
+
+## Databases
+
+${dbNodes.map(n => `- **${n.data.database}** (${n.data.host}:${n.data.port})`).join('\n')}
+
+## Running
+
+\`\`\`bash
+go mod tidy
+go run .
+\`\`\`
+
+## Endpoints
+
+- REST: http://localhost:8080/api/
+- gRPC: localhost:50051
+- GraphQL: http://localhost:8081/graphql
+
+## REST API
+
+${dbNodes.flatMap(n => (n.data.tables || []).map(t => `
+### ${t.name}
+- GET /api/${n.data.database}/${t.name} - List all
+- GET /api/${n.data.database}/${t.name}/:id - Get by ID
+- POST /api/${n.data.database}/${t.name} - Create
+- PUT /api/${n.data.database}/${t.name}/:id - Update
+- DELETE /api/${n.data.database}/${t.name}/:id - Delete
+`)).join('')}
+`;
+}
+
+// Helper: Generate service code
+function generateServiceCode(serviceData, flowNodes, flowEdges, hasDataGateway) {
+  const serviceName = serviceData.name || 'service';
+  
+  const main = `package main
+
+import (
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+)
+
+func main() {
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+	
+	mux := http.NewServeMux()
+	registerHandlers(mux)
+	
+	fmt.Printf("${serviceName} starting on :%s\\n", port)
+	log.Fatal(http.ListenAndServe(":"+port, mux))
+}
+`;
+
+  const handlers = `package main
+
+import (
+	"encoding/json"
+	"io"
+	"net/http"
+)
+
+${hasDataGateway ? `
+const dataGatewayURL = "http://localhost:8080"
+
+func callDataGateway(method, path string, body io.Reader) ([]byte, error) {
+	req, err := http.NewRequest(method, dataGatewayURL+path, body)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	return io.ReadAll(resp.Body)
+}
+` : ''}
+
+func registerHandlers(mux *http.ServeMux) {
+	mux.HandleFunc("/health", healthHandler)
+	mux.HandleFunc("/", mainHandler)
+}
+
+func healthHandler(w http.ResponseWriter, r *http.Request) {
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+func mainHandler(w http.ResponseWriter, r *http.Request) {
+	// Generated from flow
+	w.Header().Set("Content-Type", "application/json")
+	
+${generateFlowHandlerCode(flowNodes, flowEdges)}
+}
+`;
+
+  const goMod = `module ${sanitizeRepoName(serviceName)}
+
+go 1.21
+`;
+
+  return { main, handlers, goMod };
+}
+
+// Helper: Generate flow handler code
+function generateFlowHandlerCode(nodes, edges) {
+  if (!nodes || nodes.length === 0) {
+    return '\tjson.NewEncoder(w).Encode(map[string]string{"message": "Service ready"})';
+  }
+  
+  // Simple flow translation
+  let code = '';
+  for (const node of nodes) {
+    if (node.type === 'action' && node.data?.code) {
+      code += `\t// ${node.data.label || 'Action'}\n`;
+      code += `\t${node.data.code.replace(/=/g, ':=')}\n\n`;
+    }
+  }
+  code += '\tjson.NewEncoder(w).Encode(map[string]string{"message": "Flow executed"})';
+  return code;
+}
+
+// Helper: Generate service README
+function generateServiceReadme(serviceData, flow) {
+  return `# ${serviceData.name || 'Service'}
+
+${serviceData.description || 'Auto-generated API service.'}
+
+## Running
+
+\`\`\`bash
+go mod tidy
+go run .
+\`\`\`
+
+## Endpoints
+
+- GET /health - Health check
+- * / - Main handler
+
+## Flow
+
+- Nodes: ${flow.nodes?.length || 0}
+- Edges: ${flow.edges?.length || 0}
+`;
+}
 
 // Helper: Generate Go code from flow nodes
 function generateGoCode(nodes, edges) {

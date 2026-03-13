@@ -437,3 +437,402 @@
   color: #e74c3c;
   border: 1px solid #e74c3c;
 }
+
+/* Breadcrumb Navigation */
+.breadcrumb {
+  background: #1a1a1a;
+  padding: 10px 20px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid #333;
+}
+
+.breadcrumb-item {
+  background: none;
+  border: none;
+  color: #8b949e;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+
+.breadcrumb-item:hover {
+  background: #2d2d2d;
+  color: #fff;
+}
+
+.breadcrumb-item.active {
+  color: #fff;
+  font-weight: bold;
+}
+
+.breadcrumb-separator {
+  color: #555;
+  font-size: 16px;
+}
+
+/* Loading Screen */
+.loading-screen {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+}
+
+/* Service Node */
+.service-node {
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  border: 2px solid #5b5fee;
+  border-radius: 8px;
+  padding: 12px 16px;
+  min-width: 140px;
+  color: #fff;
+  cursor: pointer;
+}
+
+.service-node:hover {
+  box-shadow: 0 0 15px rgba(99, 102, 241, 0.5);
+}
+
+.service-node-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.service-icon {
+  font-size: 16px;
+}
+
+.service-name {
+  font-weight: bold;
+  font-size: 13px;
+}
+
+.service-description {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.7);
+  margin-bottom: 6px;
+}
+
+.service-stats {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.service-actions {
+  display: flex;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.service-btn {
+  background: rgba(255, 255, 255, 0.1);
+  border: none;
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.service-btn:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.service-btn-delete:hover {
+  background: rgba(231, 76, 60, 0.5);
+}
+
+/* DataGateway Node */
+.datagateway-node {
+  background: linear-gradient(135deg, #0d9488, #14b8a6);
+  border: 2px solid #0f766e;
+  border-radius: 8px;
+  padding: 12px 16px;
+  min-width: 150px;
+  color: #fff;
+  cursor: pointer;
+}
+
+.datagateway-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.datagateway-icon {
+  font-size: 18px;
+}
+
+.datagateway-name {
+  font-weight: bold;
+  font-size: 14px;
+}
+
+.datagateway-badge {
+  background: rgba(255, 255, 255, 0.2);
+  padding: 2px 6px;
+  border-radius: 10px;
+  font-size: 9px;
+  font-weight: bold;
+}
+
+.datagateway-stats {
+  margin-bottom: 8px;
+}
+
+.stat-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  margin: 3px 0;
+}
+
+.stat-icon {
+  font-size: 12px;
+}
+
+.datagateway-protocols {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.protocol-badge {
+  background: rgba(255, 255, 255, 0.15);
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 10px;
+}
+
+.protocol-badge.large {
+  padding: 4px 12px;
+  font-size: 12px;
+}
+
+.datagateway-footer {
+  border-top: 1px solid rgba(255, 255, 255, 0.2);
+  padding-top: 6px;
+}
+
+.readonly-notice {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+/* Confirm Dialog */
+.confirm-dialog {
+  background: #2d2d2d;
+  border-radius: 8px;
+  padding: 24px;
+  min-width: 350px;
+  max-width: 450px;
+  border: 1px solid #444;
+  outline: none;
+}
+
+.confirm-dialog h3 {
+  margin: 0 0 12px 0;
+  color: #fff;
+  font-size: 18px;
+}
+
+.confirm-dialog p {
+  color: #aaa;
+  font-size: 14px;
+  margin: 0 0 20px 0;
+  line-height: 1.5;
+}
+
+.confirm-dialog-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+/* DataGateway Modal */
+.datagateway-modal {
+  max-width: 700px;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid #444;
+  padding-bottom: 15px;
+  margin-bottom: 20px;
+}
+
+.modal-header h2 {
+  margin: 0;
+  border: none;
+  padding: 0;
+}
+
+.close-btn {
+  background: none;
+  border: none;
+  color: #888;
+  font-size: 24px;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+}
+
+.close-btn:hover {
+  color: #fff;
+}
+
+.modal-body {
+  margin-bottom: 20px;
+}
+
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding-top: 15px;
+  border-top: 1px solid #444;
+}
+
+.info-box {
+  background: rgba(52, 152, 219, 0.15);
+  border: 1px solid #3498db;
+  color: #5dade2;
+  padding: 12px;
+  border-radius: 4px;
+  font-size: 13px;
+  margin-bottom: 15px;
+}
+
+.info-box.warning {
+  background: rgba(241, 196, 15, 0.15);
+  border-color: #f1c40f;
+  color: #f4d03f;
+}
+
+.database-list {
+  margin: 10px 0;
+}
+
+.database-item {
+  background: #1e1e1e;
+  border-radius: 4px;
+  padding: 12px;
+  margin-bottom: 10px;
+}
+
+.database-header {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.db-host {
+  color: #888;
+  font-size: 12px;
+}
+
+.table-list {
+  margin-left: 20px;
+}
+
+.table-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 0;
+  font-size: 12px;
+  color: #aaa;
+}
+
+.table-name {
+  color: #ccc;
+}
+
+.column-count {
+  color: #666;
+}
+
+.endpoint-list {
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.endpoint-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+  border-bottom: 1px solid #333;
+  font-size: 12px;
+}
+
+.method-badge {
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: bold;
+  min-width: 50px;
+  text-align: center;
+}
+
+.method-get { background: #27ae60; color: #fff; }
+.method-post { background: #3498db; color: #fff; }
+.method-put { background: #f39c12; color: #fff; }
+.method-delete { background: #e74c3c; color: #fff; }
+
+.endpoint-path {
+  background: #1e1e1e;
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-family: monospace;
+  color: #fff;
+}
+
+.endpoint-desc {
+  color: #888;
+}
+
+.empty-message {
+  color: #666;
+  font-style: italic;
+  padding: 20px;
+  text-align: center;
+}
+
+.code-preview {
+  background: #1e1e1e;
+  padding: 15px;
+  border-radius: 4px;
+  overflow-x: auto;
+  font-family: monospace;
+  font-size: 11px;
+  color: #ccc;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+/* Service Config Modal */
+.service-config-modal textarea {
+  width: 100%;
+  padding: 8px 12px;
+  background: #1e1e1e;
+  border: 1px solid #444;
+  border-radius: 4px;
+  color: #fff;
+  font-size: 13px;
+  resize: vertical;
+}
+
+.service-config-modal textarea:focus {
+  outline: none;
+  border-color: #6366f1;
+}
