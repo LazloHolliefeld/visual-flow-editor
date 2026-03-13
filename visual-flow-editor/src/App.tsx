@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useState, useEffect, useRef } from 'react';
 import {
   ReactFlow,
   ReactFlowProvider,
@@ -22,6 +22,7 @@ import { DatabaseConfigModal } from './components/DatabaseConfigModal';
 import './App.css';
 
 const API_BASE = 'http://localhost:3001';
+const GITHUB_REPO_URL = 'https://github.com/LazloHolliefeld/flow-generated-code.git';
 
 const initialNodes: Node[] = [
   {
@@ -71,10 +72,154 @@ const initialEdges: Edge[] = [
 ];
 
 function App() {
-  const [nodes, setNodes] = useState<Node[]>(initialNodes);
-  const [edges, setEdges] = useState<Edge[]>(initialEdges);
+  const [nodes, setNodes] = useState<Node[]>([]);
+  const [edges, setEdges] = useState<Edge[]>([]);
   const [selectedDbNode, setSelectedDbNode] = useState<string | null>(null);
   const [isDbModalOpen, setIsDbModalOpen] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'error'>('saved');
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [generateStatus, setGenerateStatus] = useState<string | null>(null);
+  const saveTimeoutRef = useRef<number | null>(null);
+  const isInitialLoadRef = useRef(true);
+
+  // Load project on startup
+  useEffect(() => {
+    const loadProject = async () => {
+      try {
+        const response = await fetch(`${API_BASE}/api/project/load`);
+        const data = await response.json();
+        
+        if (data.success && data.nodes && data.edges) {
+          // Restore onConfigure callbacks for database nodes
+          const restoredNodes = data.nodes.map((node: Node) => {
+            if (node.type === 'database') {
+              return {
+                ...node,
+                data: {
+                  ...node.data,
+                  onConfigure: () => openDbConfigById(node.id),
+                },
+              };
+            }
+            return node;
+          });
+          setNodes(restoredNodes);
+          setEdges(data.edges);
+          console.log(`Loaded project: ${data.nodes.length} nodes, ${data.edges.length} edges`);
+        } else {
+          // No saved project, use initial nodes
+          setNodes(initialNodes);
+          setEdges(initialEdges);
+        }
+      } catch (error) {
+        console.error('Failed to load project:', error);
+        setNodes(initialNodes);
+        setEdges(initialEdges);
+      } finally {
+        setIsLoading(false);
+        // Allow saves after initial load
+        setTimeout(() => {
+          isInitialLoadRef.current = false;
+        }, 500);
+      }
+    };
+    
+    loadProject();
+  }, []);
+
+  // Helper to open db config by id (needed for restored nodes)
+  const openDbConfigById = useCallback((nodeId: string) => {
+    setSelectedDbNode(nodeId);
+    setIsDbModalOpen(true);
+  }, []);
+
+  // Auto-save when nodes or edges change
+  useEffect(() => {
+    if (isInitialLoadRef.current || isLoading) return;
+    if (nodes.length === 0 && edges.length === 0) return;
+    
+    // Debounce saves
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+    }
+    
+    setSaveStatus('saving');
+    
+    saveTimeoutRef.current = window.setTimeout(async () => {
+      try {
+        // Strip out callback functions before saving
+        const nodesToSave = nodes.map(node => ({
+          ...node,
+          data: node.type === 'database' 
+            ? { ...node.data, onConfigure: undefined }
+            : node.data,
+        }));
+        
+        const response = await fetch(`${API_BASE}/api/project/save`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ nodes: nodesToSave, edges }),
+        });
+        
+        const data = await response.json();
+        if (data.success) {
+          setSaveStatus('saved');
+        } else {
+          setSaveStatus('error');
+        }
+      } catch (error) {
+        console.error('Failed to save project:', error);
+        setSaveStatus('error');
+      }
+    }, 1000);
+    
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+    };
+  }, [nodes, edges, isLoading]);
+
+  // Generate code and push to GitHub
+  const handleGenerateAndPush = useCallback(async () => {
+    setIsGenerating(true);
+    setGenerateStatus('Generating code...');
+    
+    try {
+      // Strip callbacks before sending
+      const nodesToSend = nodes.map(node => ({
+        ...node,
+        data: node.type === 'database' 
+          ? { ...node.data, onConfigure: undefined }
+          : node.data,
+      }));
+      
+      const response = await fetch(`${API_BASE}/api/generate/push-to-github`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          nodes: nodesToSend,
+          edges,
+          repoUrl: GITHUB_REPO_URL,
+          commitMessage: `Update flow - ${new Date().toISOString()}`,
+        }),
+      });
+      
+      const data = await response.json();
+      
+      if (data.success) {
+        setGenerateStatus(`✓ Pushed to GitHub: ${data.files.length} files`);
+        setTimeout(() => setGenerateStatus(null), 5000);
+      } else {
+        setGenerateStatus(`✗ Error: ${data.message}`);
+      }
+    } catch (error) {
+      setGenerateStatus(`✗ Failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setIsGenerating(false);
+    }
+  }, [nodes, edges]);
 
   const onNodesChange: OnNodesChange = useCallback(
     (changes) => setNodes((nds) => applyNodeChanges(changes, nds)),
@@ -157,6 +302,16 @@ function App() {
 
   console.log('App rendering with', nodes.length, 'nodes');
 
+  if (isLoading) {
+    return (
+      <div className="app-container" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ textAlign: 'center', color: '#fff' }}>
+          <h2>Loading project...</h2>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <ReactFlowProvider>
       <div className="app-container">
@@ -180,12 +335,45 @@ function App() {
               <button onClick={() => addNode('loop')}>⬡ Loop</button>
               <button onClick={() => addNode('apiCall')}>▱ API Call</button>
               <button onClick={() => addNode('database')}>⛁ Database</button>
+              <hr style={{ margin: '10px 0', borderColor: '#444' }} />
+              <button 
+                onClick={handleGenerateAndPush}
+                disabled={isGenerating}
+                style={{ 
+                  background: isGenerating ? '#555' : '#238636',
+                  width: '100%',
+                  fontWeight: 'bold',
+                }}
+              >
+                {isGenerating ? '⏳ Generating...' : '🚀 Generate & Push'}
+              </button>
+              {generateStatus && (
+                <div style={{ 
+                  marginTop: '8px', 
+                  fontSize: '11px', 
+                  color: generateStatus.startsWith('✓') ? '#3fb950' : generateStatus.startsWith('✗') ? '#f85149' : '#8b949e',
+                  wordBreak: 'break-word',
+                }}>
+                  {generateStatus}
+                </div>
+              )}
             </Panel>
             <Panel position="top-right" className="info-panel">
               <h3>Visual Flow Editor</h3>
               <p>Drag nodes to reposition</p>
               <p>Click and drag from handles to connect</p>
               <p>Double-click database nodes to configure</p>
+              <hr style={{ margin: '10px 0', borderColor: '#444' }} />
+              <div style={{ fontSize: '12px', color: '#8b949e' }}>
+                Status: {
+                  saveStatus === 'saved' ? '✓ Saved' :
+                  saveStatus === 'saving' ? '⏳ Saving...' :
+                  '✗ Save error'
+                }
+              </div>
+              <div style={{ fontSize: '11px', color: '#6e7681', marginTop: '4px' }}>
+                {nodes.length} nodes, {edges.length} edges
+              </div>
             </Panel>
           </ReactFlow>
         </div>
