@@ -1,14 +1,16 @@
+import { memo } from 'react';
 import { Handle, Position } from '@xyflow/react';
 import type { NodeProps, Node } from '@xyflow/react';
 
-export type DecisionNodeData = {
+export interface DecisionNodeData {
+  [key: string]: unknown;
   label: string;
   condition?: string;
-};
+}
 
 export type DecisionNodeType = Node<DecisionNodeData, 'decision'>;
 
-export function DecisionNode({ data }: NodeProps<DecisionNodeType>) {
+export const DecisionNode = memo(function DecisionNode({ data }: NodeProps<DecisionNodeType>) {
   return (
     <div className="decision-node">
       <Handle type="target" position={Position.Top} />
@@ -22,4 +24,4 @@ export function DecisionNode({ data }: NodeProps<DecisionNodeType>) {
       <Handle type="source" position={Position.Bottom} id="false" style={{ left: '75%' }} />
     </div>
   );
-}
+});

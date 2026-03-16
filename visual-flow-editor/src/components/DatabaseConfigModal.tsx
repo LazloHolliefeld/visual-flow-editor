@@ -212,6 +212,9 @@ export function DatabaseConfigModal({ isOpen, data, onSave, onClose, onCreateDat
     setStatus(null);
     
     try {
+      // Keep UI node state in sync with what is being provisioned.
+      onSave(formData);
+
       const result = await onCreateDatabase(formData);
       setStatus({
         type: result.success ? 'success' : 'error',

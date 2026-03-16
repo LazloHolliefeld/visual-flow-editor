@@ -24,6 +24,15 @@ import { DatabaseConfigModal } from './components/DatabaseConfigModal';
 import { ConfirmDialog } from './components/ConfirmDialog';
 import { ServiceConfigModal } from './components/ServiceConfigModal';
 import { DataGatewayViewModal } from './components/DataGatewayViewModal';
+import {
+  attachProjectNodeCallbacks,
+  createProjectNode,
+  getDatabaseDropPayload,
+  getProjectNodeDeletionTargets,
+  getDefaultNodeData,
+  removeNodeFromProjectData,
+  stripNodeCallbacks,
+} from './services/nodeLifecycle';
 import './App.css';
 
 const API_BASE = 'http://localhost:3001';
@@ -58,6 +67,16 @@ function App() {
   // Project data
   const [projectData, setProjectData] = useState<ProjectData>(EMPTY_PROJECT);
   
+  // Memoized database signature for tracking changes (count + content hash)
+  // This ensures DataGateway updates when tables/columns change, not just when DBs are added/removed
+  const databaseSignature = useMemo(() => {
+    const dbNodes = projectData.projectNodes.filter((n) => n.type === 'database');
+    return JSON.stringify(dbNodes.map(n => {
+      const d = n.data as DatabaseNodeData;
+      return { db: d.database, tables: d.tables?.map(t => ({ name: t.name, cols: t.columns?.length })) };
+    }));
+  }, [projectData.projectNodes]);
+  
   // Current view data
   const [nodes, setNodes] = useState<Node[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
@@ -84,10 +103,50 @@ function App() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [generateStatus, setGenerateStatus] = useState<string | null>(null);
   
+  // DataGateway running state
+  const [isDataGatewayRunning, setIsDataGatewayRunning] = useState(false);
+  const [dataGatewayUrls, setDataGatewayUrls] = useState<{ rest?: string; grpc?: string; graphql?: string } | null>(null);
+  
   const saveTimeoutRef = useRef<number | null>(null);
   const isInitialLoadRef = useRef(true);
 
-  // Get current nodes/edges based on canvas context
+  // DataGateway Run/Stop handlers (defined early for use in effects)
+  const handleRunDataGateway = useCallback(async () => {
+    try {
+      const dataToSend = stripCallbacks(projectData);
+      const response = await fetch(`${API_BASE}/api/server/start-datagateway`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectData: dataToSend }),
+      });
+      const result = await response.json();
+      if (result.success) {
+        setIsDataGatewayRunning(true);
+        setDataGatewayUrls(result.urls);
+      } else {
+        alert(`Failed to start DataGateway: ${result.message}`);
+      }
+    } catch (error) {
+      alert(`Error starting DataGateway: ${error instanceof Error ? error.message : 'Unknown'}`);
+    }
+  }, [projectData]);
+
+  const handleStopDataGateway = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_BASE}/api/server/stop-datagateway`, {
+        method: 'POST',
+      });
+      const result = await response.json();
+      if (result.success) {
+        setIsDataGatewayRunning(false);
+        setDataGatewayUrls(null);
+      }
+    } catch (error) {
+      console.error('Error stopping DataGateway:', error);
+    }
+  }, []);
+
+  // Keep canvas state in sync with loaded/saved project data and current context.
   useEffect(() => {
     if (canvasContext.type === 'project') {
       setNodes(projectData.projectNodes);
@@ -144,44 +203,23 @@ function App() {
   }, []);
 
   // Restore callbacks to nodes after loading
-  const restoreNodeCallbacks = useCallback((data: ProjectData): ProjectData => {
-    const restoreProjectNodes = data.projectNodes.map((node: Node) => {
-      if (node.type === 'database') {
-        return {
-          ...node,
-          data: {
-            ...node.data,
-            onConfigure: () => openDbConfigById(node.id),
-            onDelete: () => confirmDeleteNode(node.id, 'database'),
-          },
-        };
-      }
-      if (node.type === 'service') {
-        const serviceData = node.data as unknown as ServiceNodeData;
-        return {
-          ...node,
-          data: {
-            ...node.data,
-            onConfigure: () => openServiceConfigById(node.id),
-            onDrillDown: () => drillIntoService(node.id, serviceData.name),
-            onDelete: () => confirmDeleteNode(node.id, 'service'),
-          },
-        };
-      }
-      if (node.type === 'dataGateway') {
-        return {
-          ...node,
-          data: {
-            ...node.data,
-            onViewDetails: () => setIsDataGatewayModalOpen(true),
-          },
-        };
-      }
-      return node;
-    });
+  const restoreNodeCallbacks = (data: ProjectData): ProjectData => {
+    const restoreProjectNodes = data.projectNodes.map((node: Node) =>
+      attachProjectNodeCallbacks(node, {
+        openDbConfigById,
+        openServiceConfigById,
+        confirmDeleteNode,
+        drillIntoService,
+        openDataGatewayDetails: () => setIsDataGatewayModalOpen(true),
+        onRunDataGateway: handleRunDataGateway,
+        onStopDataGateway: handleStopDataGateway,
+        isDataGatewayRunning,
+        dataGatewayUrls,
+      })
+    );
     
     return { ...data, projectNodes: restoreProjectNodes };
-  }, []);
+  };
 
   // Auto-save
   useEffect(() => {
@@ -219,24 +257,13 @@ function App() {
 
   // Strip callbacks for serialization
   const stripCallbacks = (data: ProjectData): ProjectData => {
-    const stripNode = (node: Node): Node => ({
-      ...node,
-      data: {
-        ...(node.data as Record<string, unknown>),
-        onConfigure: undefined,
-        onDelete: undefined,
-        onDrillDown: undefined,
-        onViewDetails: undefined,
-      },
-    });
-    
     return {
-      projectNodes: data.projectNodes.map(stripNode),
+      projectNodes: data.projectNodes.map(stripNodeCallbacks),
       projectEdges: data.projectEdges,
       serviceFlows: Object.fromEntries(
         Object.entries(data.serviceFlows).map(([k, v]) => [
           k,
-          { nodes: v.nodes.map(stripNode), edges: v.edges },
+          { nodes: v.nodes.map(stripNodeCallbacks), edges: v.edges },
         ])
       ),
     };
@@ -297,6 +324,29 @@ function App() {
     setCanvasContext({ type: 'project' });
   }, [nodes, edges, syncToProjectData]);
 
+  // Shared delete path for node-specific side effects + state removal.
+  const deleteNodeByType = useCallback(async (nodeId: string, nodeType: string) => {
+    const targetNode = projectData.projectNodes.find((n) => n.id === nodeId);
+    const dbDropPayload = targetNode ? getDatabaseDropPayload(targetNode) : null;
+
+    if (dbDropPayload) {
+      const response = await fetch(`${API_BASE}/api/db/drop`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(dbDropPayload),
+      });
+
+      const result = await response.json();
+      if (!result.success) {
+        throw new Error(result.message || `Failed to drop database ${dbDropPayload.database}`);
+      }
+    }
+
+    setNodes((prev) => prev.filter((n) => n.id !== nodeId));
+    setEdges((prev) => prev.filter((e) => e.source !== nodeId && e.target !== nodeId));
+    setProjectData((prev) => removeNodeFromProjectData(prev, nodeId, nodeType));
+  }, [projectData.projectNodes]);
+
   // Confirm delete
   const confirmDeleteNode = useCallback((nodeId: string, nodeType: string) => {
     setConfirmDialog({
@@ -304,19 +354,17 @@ function App() {
       title: `Delete ${nodeType}?`,
       message: `Are you sure you want to delete this ${nodeType}? This action cannot be undone.`,
       confirmStyle: 'danger',
-      onConfirm: () => {
-        setProjectData((prev) => ({
-          ...prev,
-          projectNodes: prev.projectNodes.filter((n) => n.id !== nodeId),
-          projectEdges: prev.projectEdges.filter((e) => e.source !== nodeId && e.target !== nodeId),
-          serviceFlows: nodeType === 'service' 
-            ? Object.fromEntries(Object.entries(prev.serviceFlows).filter(([k]) => k !== nodeId))
-            : prev.serviceFlows,
-        }));
-        setConfirmDialog((c) => ({ ...c, isOpen: false }));
+      onConfirm: async () => {
+        try {
+          await deleteNodeByType(nodeId, nodeType);
+        } catch (error) {
+          alert(`Failed to delete ${nodeType}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        } finally {
+          setConfirmDialog((c) => ({ ...c, isOpen: false }));
+        }
       },
     });
-  }, []);
+  }, [deleteNodeByType]);
 
   // New project
   const handleNewProject = useCallback(() => {
@@ -325,13 +373,25 @@ function App() {
       title: 'New Project',
       message: 'This will clear all databases, services, and flows. Are you sure?',
       confirmStyle: 'danger',
-      onConfirm: () => {
-        setProjectData(EMPTY_PROJECT);
-        setCanvasContext({ type: 'project' });
-        setConfirmDialog((c) => ({ ...c, isOpen: false }));
+      onConfirm: async () => {
+        try {
+          const targets = getProjectNodeDeletionTargets(projectData);
+          for (const target of targets) {
+            await deleteNodeByType(target.id, target.type);
+          }
+
+          setProjectData(EMPTY_PROJECT);
+          setCanvasContext({ type: 'project' });
+          setIsDataGatewayRunning(false);
+          setDataGatewayUrls(null);
+        } catch (error) {
+          alert(`Failed to reset project/database: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        } finally {
+          setConfirmDialog((c) => ({ ...c, isOpen: false }));
+        }
       },
     });
-  }, []);
+  }, [projectData, deleteNodeByType]);
 
   // Node changes
   const onNodesChange: OnNodesChange = useCallback((changes) => {
@@ -356,56 +416,13 @@ function App() {
   const addNode = useCallback((type: string) => {
     const nodeId = `${type}-${Date.now()}`;
     const position = { x: 100 + Math.random() * 200, y: 100 + Math.random() * 200 };
-    
-    let newNode: Node;
-    
-    switch (type) {
-      case 'database':
-        newNode = {
-          id: nodeId,
-          type: 'database',
-          position,
-          data: {
-            label: 'Database',
-            host: 'localhost',
-            port: 5432,
-            database: '',
-            schema: 'public',
-            tables: [],
-            onConfigure: () => openDbConfigById(nodeId),
-            onDelete: () => confirmDeleteNode(nodeId, 'database'),
-          },
-        };
-        break;
-        
-      case 'service':
-        newNode = {
-          id: nodeId,
-          type: 'service',
-          position,
-          data: {
-            label: 'New API',
-            name: '',
-            description: '',
-            onConfigure: () => openServiceConfigById(nodeId),
-            onDrillDown: () => {
-              const foundNode = projectData.projectNodes.find(n => n.id === nodeId);
-              const name = foundNode ? (foundNode.data as unknown as ServiceNodeData).name || 'API' : 'API';
-              drillIntoService(nodeId, name);
-            },
-            onDelete: () => confirmDeleteNode(nodeId, 'service'),
-          },
-        };
-        break;
-        
-      default:
-        newNode = {
-          id: nodeId,
-          type,
-          position,
-          data: getDefaultData(type),
-        };
-    }
+
+    const newNode = createProjectNode(type, nodeId, position, {
+      openDbConfigById,
+      openServiceConfigById,
+      confirmDeleteNode,
+      drillIntoService,
+    });
     
     const newNodes = [...nodes, newNode];
     setNodes(newNodes);
@@ -423,7 +440,7 @@ function App() {
         setIsServiceModalOpen(true);
       }, 100);
     }
-  }, [nodes, edges, openDbConfigById, openServiceConfigById, confirmDeleteNode, drillIntoService, projectData.projectNodes, syncToProjectData]);
+  }, [nodes, edges, openDbConfigById, openServiceConfigById, confirmDeleteNode, drillIntoService, syncToProjectData]);
 
   // Update DataGateway when databases change
   useEffect(() => {
@@ -433,7 +450,7 @@ function App() {
     const existingGateway = projectData.projectNodes.find((n) => n.type === 'dataGateway');
     
     if (dbNodes.length > 0 && !existingGateway) {
-      // Create DataGateway
+      // Create DataGateway (first database added)
       const gatewayData = {
         label: 'DataGateway',
         databases: dbNodes.map((n) => {
@@ -447,6 +464,10 @@ function App() {
         }),
         protocols: { rest: true, grpc: true, graphql: true },
         onViewDetails: () => setIsDataGatewayModalOpen(true),
+        isRunning: isDataGatewayRunning,
+        runUrls: dataGatewayUrls,
+        onRun: handleRunDataGateway,
+        onStop: handleStopDataGateway,
       };
       
       const gatewayNode: Node = {
@@ -456,61 +477,107 @@ function App() {
         data: gatewayData as unknown as Record<string, unknown>,
       };
       
+      // Update both nodes (for React Flow) and projectData (for persistence)
+      setNodes((prev) => [...prev, gatewayNode]);
       setProjectData((prev) => ({
         ...prev,
         projectNodes: [...prev.projectNodes, gatewayNode],
       }));
     } else if (dbNodes.length > 0 && existingGateway) {
-      // Update DataGateway
+      // Update DataGateway (database/table/column changes)
+      const updatedDatabases = dbNodes.map((dn) => {
+        const d = dn.data as DatabaseNodeData;
+        return {
+          name: d.database || 'unnamed',
+          host: d.host,
+          port: d.port,
+          tables: d.tables || [],
+        };
+      });
+      
+      // Update nodes state for immediate UI reflection
+      setNodes((prev) => prev.map((n) =>
+        n.type === 'dataGateway'
+          ? { 
+              ...n, 
+              data: { 
+                ...n.data, 
+                databases: updatedDatabases,
+                isRunning: isDataGatewayRunning,
+                runUrls: dataGatewayUrls,
+                onRun: handleRunDataGateway,
+                onStop: handleStopDataGateway,
+              } 
+            }
+          : n
+      ));
+      
+      // Update projectData for persistence
       setProjectData((prev) => ({
         ...prev,
         projectNodes: prev.projectNodes.map((n) =>
           n.type === 'dataGateway'
-            ? {
-                ...n,
-                data: {
-                  ...n.data,
-                  databases: dbNodes.map((dn) => {
-                    const d = dn.data as DatabaseNodeData;
-                    return {
-                      name: d.database || 'unnamed',
-                      host: d.host,
-                      port: d.port,
-                      tables: d.tables || [],
-                    };
-                  }),
-                },
-              }
+            ? { ...n, data: { ...n.data, databases: updatedDatabases } }
             : n
         ),
       }));
     } else if (dbNodes.length === 0 && existingGateway) {
-      // Remove DataGateway if no databases
+      // Remove DataGateway (all databases removed)
+      setNodes((prev) => prev.filter((n) => n.type !== 'dataGateway'));
       setProjectData((prev) => ({
         ...prev,
         projectNodes: prev.projectNodes.filter((n) => n.type !== 'dataGateway'),
       }));
     }
-  }, [projectData.projectNodes.filter((n) => n.type === 'database').length, canvasContext.type]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [databaseSignature, canvasContext.type]);
+
+  // Update DataGateway running state and callbacks
+  useEffect(() => {
+    if (canvasContext.type !== 'project') return;
+    
+    setNodes((prev) => {
+      const hasGateway = prev.some((n) => n.type === 'dataGateway');
+      if (!hasGateway) return prev;
+      
+      return prev.map((n) =>
+        n.type === 'dataGateway'
+          ? {
+              ...n,
+              data: {
+                ...n.data,
+                isRunning: isDataGatewayRunning,
+                runUrls: dataGatewayUrls,
+                onRun: handleRunDataGateway,
+                onStop: handleStopDataGateway,
+              },
+            }
+          : n
+      );
+    });
+  }, [isDataGatewayRunning, dataGatewayUrls, handleRunDataGateway, handleStopDataGateway, canvasContext.type]);
 
   // Save database config
   const handleSaveDbConfig = useCallback((data: DatabaseNodeData) => {
     if (!selectedDbNode) return;
     
+    const updateNodeData = (node: Node) => {
+      if (node.id !== selectedDbNode) return node;
+      return {
+        ...node,
+        data: {
+          ...data,
+          onConfigure: () => openDbConfigById(node.id),
+          onDelete: () => confirmDeleteNode(node.id, 'database'),
+        },
+      };
+    };
+    
+    // Update both nodes state (for React Flow) and projectData (for persistence)
+    setNodes((prev) => prev.map(updateNodeData));
     setProjectData((prev) => ({
       ...prev,
-      projectNodes: prev.projectNodes.map((node) =>
-        node.id === selectedDbNode
-          ? {
-              ...node,
-              data: {
-                ...data,
-                onConfigure: () => openDbConfigById(node.id),
-                onDelete: () => confirmDeleteNode(node.id, 'database'),
-              },
-            }
-          : node
-      ),
+      projectNodes: prev.projectNodes.map(updateNodeData),
     }));
   }, [selectedDbNode, openDbConfigById, confirmDeleteNode]);
 
@@ -518,21 +585,24 @@ function App() {
   const handleSaveServiceConfig = useCallback((data: ServiceNodeData) => {
     if (!selectedServiceNode) return;
     
+    const updateNodeData = (node: Node) => {
+      if (node.id !== selectedServiceNode) return node;
+      return {
+        ...node,
+        data: {
+          ...data,
+          onConfigure: () => openServiceConfigById(node.id),
+          onDrillDown: () => drillIntoService(node.id, data.name),
+          onDelete: () => confirmDeleteNode(node.id, 'service'),
+        },
+      };
+    };
+    
+    // Update both nodes state (for React Flow) and projectData (for persistence)
+    setNodes((prev) => prev.map(updateNodeData));
     setProjectData((prev) => ({
       ...prev,
-      projectNodes: prev.projectNodes.map((node) =>
-        node.id === selectedServiceNode
-          ? {
-              ...node,
-              data: {
-                ...data,
-                onConfigure: () => openServiceConfigById(node.id),
-                onDrillDown: () => drillIntoService(node.id, data.name),
-                onDelete: () => confirmDeleteNode(node.id, 'service'),
-              },
-            }
-          : node
-      ),
+      projectNodes: prev.projectNodes.map(updateNodeData),
     }));
   }, [selectedServiceNode, openServiceConfigById, drillIntoService, confirmDeleteNode]);
 
@@ -590,9 +660,9 @@ function App() {
 
   // Get data for modals
   const selectedDbData = useMemo(() => {
-    if (!selectedDbNode) return getDefaultData('database') as DatabaseNodeData;
+    if (!selectedDbNode) return getDefaultNodeData('database') as DatabaseNodeData;
     const node = projectData.projectNodes.find((n) => n.id === selectedDbNode);
-    return (node?.data as DatabaseNodeData) || (getDefaultData('database') as DatabaseNodeData);
+    return (node?.data as DatabaseNodeData) || (getDefaultNodeData('database') as DatabaseNodeData);
   }, [selectedDbNode, projectData.projectNodes]);
 
   const selectedServiceData = useMemo(() => {
@@ -762,25 +832,6 @@ function App() {
       </div>
     </ReactFlowProvider>
   );
-}
-
-function getDefaultData(type: string): Record<string, unknown> {
-  switch (type) {
-    case 'startEnd':
-      return { label: 'Start', type: 'start' };
-    case 'action':
-      return { label: 'Action', code: '' };
-    case 'decision':
-      return { label: 'IF', condition: '' };
-    case 'loop':
-      return { label: 'Loop', condition: '' };
-    case 'apiCall':
-      return { label: 'API Call', url: '', method: 'GET' };
-    case 'database':
-      return { label: 'Database', host: 'localhost', port: 5432, database: '', schema: 'public', tables: [] };
-    default:
-      return { label: 'Node' };
-  }
 }
 
 export default App;

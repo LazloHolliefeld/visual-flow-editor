@@ -1,7 +1,8 @@
+import { memo } from 'react';
 import { Handle, Position } from '@xyflow/react';
 import type { NodeProps, Node } from '@xyflow/react';
 
-export type TableDefinition = {
+export interface TableDefinition {
   name: string;
   columns: {
     name: string;
@@ -10,9 +11,10 @@ export type TableDefinition = {
     isNullable?: boolean;
     defaultValue?: string;
   }[];
-};
+}
 
-export type DatabaseNodeData = {
+export interface DatabaseNodeData {
+  [key: string]: unknown;
   label: string;
   connectionName?: string;
   host?: string;
@@ -21,11 +23,12 @@ export type DatabaseNodeData = {
   schema?: string;
   tables?: TableDefinition[];
   onConfigure?: () => void;
-};
+  onDelete?: () => void;
+}
 
 export type DatabaseNodeType = Node<DatabaseNodeData, 'database'>;
 
-export function DatabaseNode({ data }: NodeProps<DatabaseNodeType>) {
+export const DatabaseNode = memo(function DatabaseNode({ data }: NodeProps<DatabaseNodeType>) {
   return (
     <div className="database-node" onDoubleClick={data.onConfigure}>
       <Handle type="target" position={Position.Top} />
@@ -42,8 +45,27 @@ export function DatabaseNode({ data }: NodeProps<DatabaseNodeType>) {
         </div>
         <div className="cylinder-bottom"></div>
       </div>
-      <div className="config-hint">Double-click to configure</div>
+      <div className="database-actions">
+        {data.onConfigure && (
+          <button 
+            className="db-btn" 
+            onClick={(e) => { e.stopPropagation(); data.onConfigure?.(); }}
+            title="Configure"
+          >
+            ⚙️
+          </button>
+        )}
+        {data.onDelete && (
+          <button 
+            className="db-btn db-btn-delete" 
+            onClick={(e) => { e.stopPropagation(); data.onDelete?.(); }}
+            title="Delete"
+          >
+            🗑️
+          </button>
+        )}
+      </div>
       <Handle type="source" position={Position.Bottom} />
     </div>
   );
-}
+});

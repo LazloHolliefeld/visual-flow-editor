@@ -225,11 +225,28 @@
   margin-top: 3px;
 }
 
-.database-node .config-hint {
-  font-size: 8px;
-  color: #888;
-  text-align: center;
-  margin-top: 5px;
+.database-actions {
+  display: flex;
+  gap: 4px;
+  margin-top: 8px;
+  justify-content: center;
+}
+
+.db-btn {
+  background: rgba(255, 255, 255, 0.15);
+  border: none;
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.db-btn:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.db-btn-delete:hover {
+  background: rgba(231, 76, 60, 0.6);
 }
 
 /* Database Config Modal */
@@ -625,6 +642,105 @@
 .readonly-notice {
   font-size: 10px;
   color: rgba(255, 255, 255, 0.6);
+}
+
+/* DataGateway Running State */
+.datagateway-node.running {
+  border-color: #22c55e;
+  box-shadow: 0 0 20px rgba(34, 197, 94, 0.4);
+  animation: pulse-green 2s infinite;
+}
+
+@keyframes pulse-green {
+  0%, 100% { box-shadow: 0 0 15px rgba(34, 197, 94, 0.4); }
+  50% { box-shadow: 0 0 25px rgba(34, 197, 94, 0.6); }
+}
+
+.datagateway-badge.running {
+  background: #22c55e;
+  color: #fff;
+  animation: pulse-badge 1s infinite;
+}
+
+@keyframes pulse-badge {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+.datagateway-actions {
+  display: flex;
+  gap: 6px;
+  margin: 8px 0;
+}
+
+.run-btn {
+  flex: 1;
+  background: rgba(34, 197, 94, 0.3);
+  border: 1px solid rgba(34, 197, 94, 0.5);
+  color: #fff;
+  padding: 6px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: bold;
+  transition: all 0.2s;
+}
+
+.run-btn:hover {
+  background: rgba(34, 197, 94, 0.5);
+}
+
+.run-btn.stop {
+  background: rgba(239, 68, 68, 0.3);
+  border-color: rgba(239, 68, 68, 0.5);
+}
+
+.run-btn.stop:hover {
+  background: rgba(239, 68, 68, 0.5);
+}
+
+.urls-btn {
+  background: rgba(255, 255, 255, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  color: #fff;
+  padding: 6px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.urls-btn:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.datagateway-urls {
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 4px;
+  padding: 8px;
+  margin-bottom: 8px;
+}
+
+.url-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  margin: 4px 0;
+}
+
+.url-label {
+  font-weight: bold;
+  min-width: 50px;
+}
+
+.url-row a {
+  color: #5eead4;
+  text-decoration: none;
+  word-break: break-all;
+}
+
+.url-row a:hover {
+  text-decoration: underline;
 }
 
 /* Confirm Dialog */

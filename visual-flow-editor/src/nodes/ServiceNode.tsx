@@ -3,6 +3,7 @@ import { Handle, Position } from '@xyflow/react';
 import type { Node, NodeProps } from '@xyflow/react';
 
 export interface ServiceNodeData {
+  [key: string]: unknown;
   label: string;
   name: string;
   description?: string;

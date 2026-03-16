@@ -1,14 +1,16 @@
+import { memo } from 'react';
 import { Handle, Position } from '@xyflow/react';
 import type { NodeProps, Node } from '@xyflow/react';
 
-export type LoopNodeData = {
+export interface LoopNodeData {
+  [key: string]: unknown;
   label: string;
   condition?: string;
-};
+}
 
 export type LoopNodeType = Node<LoopNodeData, 'loop'>;
 
-export function LoopNode({ data }: NodeProps<LoopNodeType>) {
+export const LoopNode = memo(function LoopNode({ data }: NodeProps<LoopNodeType>) {
   return (
     <div className="loop-node">
       <Handle type="target" position={Position.Top} />
@@ -20,4 +22,4 @@ export function LoopNode({ data }: NodeProps<LoopNodeType>) {
       <Handle type="source" position={Position.Right} id="exit" />
     </div>
   );
-}
+});

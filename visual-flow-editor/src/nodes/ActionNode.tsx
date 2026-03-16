@@ -1,14 +1,16 @@
+import { memo } from 'react';
 import { Handle, Position } from '@xyflow/react';
 import type { NodeProps, Node } from '@xyflow/react';
 
-export type ActionNodeData = {
+export interface ActionNodeData {
+  [key: string]: unknown;
   label: string;
   code?: string;
-};
+}
 
 export type ActionNodeType = Node<ActionNodeData, 'action'>;
 
-export function ActionNode({ data }: NodeProps<ActionNodeType>) {
+export const ActionNode = memo(function ActionNode({ data }: NodeProps<ActionNodeType>) {
   return (
     <div className="action-node">
       <Handle type="target" position={Position.Top} />
@@ -19,4 +21,4 @@ export function ActionNode({ data }: NodeProps<ActionNodeType>) {
       <Handle type="source" position={Position.Bottom} />
     </div>
   );
-}
+});

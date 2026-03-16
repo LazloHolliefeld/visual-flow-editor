@@ -1,15 +1,17 @@
+import { memo } from 'react';
 import { Handle, Position } from '@xyflow/react';
 import type { NodeProps, Node } from '@xyflow/react';
 
-export type ApiCallNodeData = {
+export interface ApiCallNodeData {
+  [key: string]: unknown;
   label: string;
   url?: string;
   method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
-};
+}
 
 export type ApiCallNodeType = Node<ApiCallNodeData, 'apiCall'>;
 
-export function ApiCallNode({ data }: NodeProps<ApiCallNodeType>) {
+export const ApiCallNode = memo(function ApiCallNode({ data }: NodeProps<ApiCallNodeType>) {
   return (
     <div className="api-call-node">
       <Handle type="target" position={Position.Top} />
@@ -20,4 +22,4 @@ export function ApiCallNode({ data }: NodeProps<ApiCallNodeType>) {
       <Handle type="source" position={Position.Bottom} />
     </div>
   );
-}
+});
