@@ -153,6 +153,36 @@ netstat -ano | findstr :5173
 taskkill /PID <pid> /F
 ```
 
+## Quick Start / Running the GUI
+
+### Easiest Way (Recommended)
+From the workspace root, double-click **`start-dev.bat`** to launch the dev server.
+
+The batch script will:
+1. Enable PowerShell script execution (one-time setup)
+2. Kill any existing Node processes on ports 3001 and 5173
+3. Start the frontend on `http://localhost:5173` (or 5174 if 5173 is taken)
+4. Start the backend API on `http://localhost:3001`
+
+### Manual Method
+
+**If `start-dev.bat` doesn't work:**
+
+1. Open Command Prompt or PowerShell in the `visual-flow-editor` folder
+2. Run: `npm run dev`
+3. Frontend: `http://localhost:5173`
+4. Backend: `http://localhost:3001`
+
+**PowerShell Note:** If you see "execution policy" error, run this once:
+```powershell
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser -Force
+```
+
+### Troubleshooting
+- **Port 5173/5174 in use:** Vite will automatically try the next available port
+- **Port 3001 in use:** Kill Node processes with `taskkill /IM node.exe /F`
+- **Module not found:** Run `npm install` in both root and `server/` folder
+
 ## Available Scripts
 
 - `npm run dev` - Start frontend + backend servers (ports 5173 + 3001)
