@@ -6,6 +6,7 @@ export { LoopNode } from './LoopNode';
 export { DatabaseNode } from './DatabaseNode';
 export { ServiceNode } from './ServiceNode';
 export { DataGatewayNode } from './DataGatewayNode';
+export { RequestNode } from './RequestNode';
 
 export type { DecisionNodeData, DecisionNodeType } from './DecisionNode';
 export type { ActionNodeData, ActionNodeType } from './ActionNode';
@@ -15,9 +16,11 @@ export type { LoopNodeData, LoopNodeType } from './LoopNode';
 export type { DatabaseNodeData, DatabaseNodeType, TableDefinition } from './DatabaseNode';
 export type { ServiceNodeData, ServiceNodeType } from './ServiceNode';
 export type { DataGatewayNodeData, DataGatewayNodeType } from './DataGatewayNode';
+export type { RequestNodeData, RequestNodeType } from './RequestNode';
 
 import { DecisionNode } from './DecisionNode';
 import { ActionNode } from './ActionNode';
+import { RequestNode } from './RequestNode';
 import { StartEndNode } from './StartEndNode';
 import { ApiCallNode } from './ApiCallNode';
 import { LoopNode } from './LoopNode';
@@ -34,4 +37,5 @@ export const nodeTypes = {
   database: DatabaseNode,
   service: ServiceNode,
   dataGateway: DataGatewayNode,
+  request: RequestNode,
 };

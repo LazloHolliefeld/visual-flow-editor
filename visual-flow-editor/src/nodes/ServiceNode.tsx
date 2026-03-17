@@ -1,6 +1,9 @@
 import { memo } from 'react';
 import { Handle, Position } from '@xyflow/react';
 import type { Node, NodeProps } from '@xyflow/react';
+import type { ApiContract, ApiContractField } from '../types/apiContract';
+
+export type { ApiContract, ApiContractField };
 
 export interface ServiceNodeData {
   [key: string]: unknown;
@@ -8,6 +11,7 @@ export interface ServiceNodeData {
   name: string;
   description?: string;
   repoUrl?: string;
+  apiContracts?: ApiContract[];
   endpoints?: Array<{
     method: string;
     path: string;
@@ -27,7 +31,7 @@ export const ServiceNode = memo(function ServiceNode({ data }: NodeProps<Service
     }
   };
 
-  const endpointCount = data.endpoints?.length || 0;
+  const endpointCount = data.apiContracts?.length || data.endpoints?.length || 0;
 
   return (
     <div 

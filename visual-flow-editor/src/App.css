@@ -903,6 +903,7 @@
 .method-get { background: #27ae60; color: #fff; }
 .method-post { background: #3498db; color: #fff; }
 .method-put { background: #f39c12; color: #fff; }
+.method-patch { background: #8e44ad; color: #fff; }
 .method-delete { background: #e74c3c; color: #fff; }
 
 .endpoint-path {
@@ -951,4 +952,201 @@
 .service-config-modal textarea:focus {
   outline: none;
   border-color: #6366f1;
+}
+
+/* API Request Builder Modal */
+.api-request-modal {
+  min-width: 980px;
+  max-width: 1100px;
+}
+
+.api-request-layout {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+.api-contract-list,
+.api-contract-editor {
+  background: #1e1e1e;
+  border: 1px solid #3a3a3a;
+  border-radius: 6px;
+  padding: 12px;
+}
+
+.api-contract-list {
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.api-contract-list-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.api-contract-list-header h3 {
+  margin: 0;
+}
+
+.api-contract-item {
+  width: 100%;
+  text-align: left;
+  background: #272727;
+  border: 1px solid #444;
+  border-radius: 4px;
+  color: #fff;
+  padding: 8px;
+  margin-bottom: 8px;
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  gap: 8px;
+  align-items: center;
+  cursor: pointer;
+}
+
+.api-contract-item:hover {
+  border-color: #6366f1;
+}
+
+.api-contract-item.active {
+  border-color: #6366f1;
+  box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.35);
+}
+
+.api-contract-name {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.api-contract-delete {
+  color: #999;
+  font-size: 12px;
+  padding: 0 4px;
+}
+
+.api-contract-delete:hover {
+  color: #f87171;
+}
+
+.api-schema-section {
+  margin-top: 14px;
+}
+
+.checkbox-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #bbb;
+  min-width: 90px;
+}
+
+.checkbox-inline input {
+  margin: 0;
+}
+
+/* Request Node - incoming API request representation */
+.request-node {
+  background: linear-gradient(135deg, #ec4899, #f43f5e);
+  border: 2px solid #be185d;
+  border-radius: 8px;
+  padding: 12px 16px;
+  min-width: 180px;
+  color: #fff;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+}
+
+.request-node:hover {
+  box-shadow: 0 0 15px rgba(236, 72, 153, 0.5);
+}
+
+.request-node-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.request-icon {
+  font-size: 16px;
+}
+
+.request-method {
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: bold;
+  min-width: 45px;
+  text-align: center;
+}
+
+.request-node-path {
+  background: rgba(0, 0, 0, 0.2);
+  padding: 6px 8px;
+  border-radius: 4px;
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+
+.request-node-path code {
+  font-family: 'Courier New', monospace;
+  color: #fff;
+}
+
+.request-node-name {
+  font-weight: bold;
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+
+.request-node-description {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.8);
+  margin-bottom: 6px;
+  font-style: italic;
+}
+
+.request-node-fields {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.fields-section {
+  margin-top: 6px;
+  padding: 4px 0;
+}
+
+.fields-label {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.request-edit-btn {
+  margin-top: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  background: rgba(255, 255, 255, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 4px;
+  color: #fff;
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.request-edit-btn:hover {
+  background: rgba(255, 255, 255, 0.25);
+  border-color: rgba(255, 255, 255, 0.5);
+}
+
+@media (max-width: 1100px) {
+  .api-request-modal {
+    min-width: 92vw;
+  }
+
+  .api-request-layout {
+    grid-template-columns: 1fr;
+  }
 }

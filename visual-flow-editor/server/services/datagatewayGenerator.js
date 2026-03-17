@@ -103,6 +103,10 @@ func columnExists(database, table, column string) bool {
   return allowedSchema[database][table][column]
 }
 
+func isProtectedIdentityColumn(database, table, column string) bool {
+  return strings.EqualFold(column, "id") && columnExists(database, table, column)
+}
+
 func parseRef(raw string) (alias string, column string, ok bool) {
   parts := strings.Split(raw, ".")
   if len(parts) != 2 {
@@ -112,6 +116,38 @@ func parseRef(raw string) (alias string, column string, ok bool) {
     return "", "", false
   }
   return parts[0], parts[1], true
+}
+
+func buildReferenceMaps(baseTable, baseAlias string, joins []joinInput) (map[string]string, map[string]string) {
+  aliasToTable := map[string]string{baseAlias: baseTable}
+  tableToAlias := map[string]string{strings.ToLower(baseTable): baseAlias}
+
+  for i, j := range joins {
+    joinAlias := fmt.Sprintf("j%d", i+1)
+    aliasToTable[joinAlias] = j.Table
+    if _, exists := tableToAlias[strings.ToLower(j.Table)]; !exists {
+      tableToAlias[strings.ToLower(j.Table)] = joinAlias
+    }
+  }
+
+  return aliasToTable, tableToAlias
+}
+
+func resolveRefAliasOrTable(raw string, aliasToTable map[string]string, tableToAlias map[string]string) (resolvedAlias string, resolvedTable string, resolvedCol string, err error) {
+  left, col, ok := parseRef(raw)
+  if !ok {
+    return "", "", "", fmt.Errorf("invalid ref: %s", raw)
+  }
+
+  if table, exists := aliasToTable[left]; exists {
+    return left, table, col, nil
+  }
+
+  if alias, exists := tableToAlias[strings.ToLower(left)]; exists {
+    return alias, aliasToTable[alias], col, nil
+  }
+
+  return "", "", "", fmt.Errorf("invalid ref: %s", raw)
 }
 
 type conditionInput struct {
@@ -137,7 +173,6 @@ type fetchRequest struct {
   RetrieveFields []string               
   Join           *joinInput             
   Joins          []joinInput            
-  LogicalOp      string                 
   OrderBy        []map[string]string    
   Limit          int                    
   Offset         int                    
@@ -165,7 +200,6 @@ type updateRequest struct {
   Name           string                 
   Values         map[string]interface{} 
   SearchCriteria map[string]interface{} 
-  LogicalOp      string                 
 }
 
 type updatePayload struct {
@@ -177,7 +211,6 @@ type updatePayload struct {
 type deleteRequest struct {
   Name           string                 
   SearchCriteria map[string]interface{} 
-  LogicalOp      string                 
 }
 
 type deletePayload struct {
@@ -255,15 +288,39 @@ func appendValueCondition(parts *[]string, args *[]interface{}, lhs string, op s
   *parts = append(*parts, fmt.Sprintf("%s %s $%d", lhs, op, len(*args)))
 }
 
-func buildWhereClause(database, baseTable, baseAlias string, criteria map[string]interface{}, logical string, args *[]interface{}) (string, error) {
+func extractWhereLogical(criteria map[string]interface{}) (map[string]interface{}, string, error) {
+  if len(criteria) == 0 {
+    return criteria, "AND", nil
+  }
+
+  logical := "AND"
+  cleaned := map[string]interface{}{}
+  for key, value := range criteria {
+    if strings.EqualFold(key, "logicalOp") {
+      logical = normalizeLogical(fmt.Sprintf("%v", value))
+      continue
+    }
+    cleaned[key] = value
+  }
+
+  return cleaned, logical, nil
+}
+
+func buildWhereClause(database, baseTable, baseAlias string, criteria map[string]interface{}, args *[]interface{}) (string, error) {
+  cleanedCriteria, joinLogical, err := extractWhereLogical(criteria)
+  if err != nil {
+    return "", err
+  }
   if len(criteria) == 0 {
     return "", nil
   }
 
   parts := []string{}
-  joinLogical := normalizeLogical(logical)
+  if len(cleanedCriteria) == 0 {
+    return "", nil
+  }
 
-  for field, raw := range criteria {
+  for field, raw := range cleanedCriteria {
     if !columnExists(database, baseTable, field) {
       return "", fmt.Errorf("invalid field in searchCriteria: %s", field)
     }
@@ -278,7 +335,13 @@ func buildWhereClause(database, baseTable, baseAlias string, criteria map[string
           return "", fmt.Errorf("conditions must be a non-empty array for field %s", field)
         }
 
-        groupLogical := normalizeLogical(fmt.Sprintf("%v", typed["logicalOp"]))
+        groupLogical := joinLogical
+        if groupLogicalRaw, hasGroupLogical := typed["logicalOp"]; hasGroupLogical {
+          groupLogical = normalizeLogical(fmt.Sprintf("%v", groupLogicalRaw))
+          if groupLogical != joinLogical {
+            return "", fmt.Errorf("mixing AND and OR in one searchCriteria is not supported")
+          }
+        }
         groupParts := []string{}
         for _, c := range condsList {
           cMap, ok := c.(map[string]interface{})
@@ -348,7 +411,7 @@ func buildJoinClause(database, baseTable, baseAlias string, joins []joinInput, a
     return "", nil
   }
 
-  aliasToTable := map[string]string{baseAlias: baseTable}
+  aliasToTable, tableToAlias := buildReferenceMaps(baseTable, baseAlias, joins)
   joinSQL := []string{}
 
   for i, j := range joins {
@@ -357,7 +420,6 @@ func buildJoinClause(database, baseTable, baseAlias string, joins []joinInput, a
     }
 
     joinAlias := fmt.Sprintf("j%d", i+1)
-    aliasToTable[joinAlias] = j.Table
 
     onParts := []string{}
     for joinCol, raw := range j.SearchCriteria {
@@ -369,12 +431,8 @@ func buildJoinClause(database, baseTable, baseAlias string, joins []joinInput, a
 
       switch typed := raw.(type) {
       case string:
-        refAlias, refCol, ok := parseRef(typed)
-        if !ok {
-          return "", fmt.Errorf("invalid join ref: %s", typed)
-        }
-        refTable, ok := aliasToTable[refAlias]
-        if !ok || !columnExists(database, refTable, refCol) {
+        refAlias, refTable, refCol, err := resolveRefAliasOrTable(typed, aliasToTable, tableToAlias)
+        if err != nil || !columnExists(database, refTable, refCol) {
           return "", fmt.Errorf("invalid join ref field: %s", typed)
         }
         onParts = append(onParts, fmt.Sprintf("%s = %s.%s", lhs, quoteIdent(refAlias), quoteIdent(refCol)))
@@ -389,12 +447,11 @@ func buildJoinClause(database, baseTable, baseAlias string, joins []joinInput, a
         }
 
         if refRaw, ok := typed["ref"]; ok {
-          refAlias, refCol, ok := parseRef(fmt.Sprintf("%v", refRaw))
-          if !ok {
+          refAlias, refTable, refCol, err := resolveRefAliasOrTable(fmt.Sprintf("%v", refRaw), aliasToTable, tableToAlias)
+          if err != nil {
             return "", fmt.Errorf("invalid join ref")
           }
-          refTable, ok := aliasToTable[refAlias]
-          if !ok || !columnExists(database, refTable, refCol) {
+          if !columnExists(database, refTable, refCol) {
             return "", fmt.Errorf("invalid join ref field")
           }
           onParts = append(onParts, fmt.Sprintf("%s %s %s.%s", lhs, op, quoteIdent(refAlias), quoteIdent(refCol)))
@@ -416,16 +473,18 @@ func buildJoinClause(database, baseTable, baseAlias string, joins []joinInput, a
   return strings.Join(joinSQL, ""), nil
 }
 
-func buildSelectFields(database, baseTable, baseAlias string, fields []string) ([]string, error) {
+func buildSelectFields(database, baseTable, baseAlias string, joins []joinInput, fields []string) ([]string, error) {
   if len(fields) == 0 {
     return []string{baseAlias + ".*"}, nil
   }
 
+  aliasToTable, tableToAlias := buildReferenceMaps(baseTable, baseAlias, joins)
+
   out := []string{}
   for _, f := range fields {
     if strings.Contains(f, ".") {
-      alias, col, ok := parseRef(f)
-      if !ok || !isSafeIdentifier(alias) || !isSafeIdentifier(col) {
+      alias, refTable, col, err := resolveRefAliasOrTable(f, aliasToTable, tableToAlias)
+      if err != nil || !columnExists(database, refTable, col) {
         return nil, fmt.Errorf("invalid retrieveFields entry: %s", f)
       }
       out = append(out, fmt.Sprintf("%s.%s", quoteIdent(alias), quoteIdent(col)))
@@ -503,7 +562,7 @@ func handleFetch(w http.ResponseWriter, r *http.Request) {
       joins = append(joins, *req.Join)
     }
 
-    fields, err := buildSelectFields(payload.Database, req.Name, baseAlias, req.RetrieveFields)
+    fields, err := buildSelectFields(payload.Database, req.Name, baseAlias, joins, req.RetrieveFields)
     if err != nil {
       writeJSON(w, http.StatusBadRequest, map[string]interface{}{"success": false, "message": err.Error()})
       return
@@ -515,11 +574,13 @@ func handleFetch(w http.ResponseWriter, r *http.Request) {
       return
     }
 
-    whereSQL, err := buildWhereClause(payload.Database, req.Name, baseAlias, req.SearchCriteria, req.LogicalOp, &args)
+    whereSQL, err := buildWhereClause(payload.Database, req.Name, baseAlias, req.SearchCriteria, &args)
     if err != nil {
       writeJSON(w, http.StatusBadRequest, map[string]interface{}{"success": false, "message": err.Error()})
       return
     }
+
+    aliasToTable, tableToAlias := buildReferenceMaps(req.Name, baseAlias, joins)
 
     orderSQL := ""
     if len(req.OrderBy) > 0 {
@@ -532,8 +593,8 @@ func handleFetch(w http.ResponseWriter, r *http.Request) {
         }
 
         if strings.Contains(field, ".") {
-          alias, col, ok := parseRef(field)
-          if !ok {
+          alias, refTable, col, err := resolveRefAliasOrTable(field, aliasToTable, tableToAlias)
+          if err != nil || !columnExists(payload.Database, refTable, col) {
             writeJSON(w, http.StatusBadRequest, map[string]interface{}{"success": false, "message": "invalid orderBy field"})
             return
           }
@@ -607,6 +668,11 @@ func handleInsert(w http.ResponseWriter, r *http.Request) {
     return
   }
 
+  if payload.Database == "" {
+    writeJSON(w, http.StatusBadRequest, map[string]interface{}{"success": false, "message": "database is required"})
+    return
+  }
+
   db := getDBOrWriteError(w, payload.Database)
   if db == nil {
     return
@@ -629,6 +695,7 @@ func handleInsert(w http.ResponseWriter, r *http.Request) {
   defer tx.Rollback()
 
   affected := int64(0)
+  results := make([]map[string]interface{}, 0, len(requests))
   for _, req := range requests {
     if !isSafeIdentifier(req.Name) || !tableExists(payload.Database, req.Name) {
       writeJSON(w, http.StatusBadRequest, map[string]interface{}{"success": false, "message": "invalid table name: " + req.Name})
@@ -644,12 +711,18 @@ func handleInsert(w http.ResponseWriter, r *http.Request) {
       return
     }
 
+    insertedRows := []map[string]interface{}{}
+
     for _, row := range rowsToInsert {
       cols := []string{}
       ph := []string{}
       args := []interface{}{}
       i := 1
       for k, v := range row {
+        if isProtectedIdentityColumn(payload.Database, req.Name, k) {
+          writeJSON(w, http.StatusBadRequest, map[string]interface{}{"success": false, "message": "id is auto-generated and cannot be provided"})
+          return
+        }
         if !columnExists(payload.Database, req.Name, k) {
           writeJSON(w, http.StatusBadRequest, map[string]interface{}{"success": false, "message": "invalid insert column: " + k})
           return
@@ -660,15 +733,46 @@ func handleInsert(w http.ResponseWriter, r *http.Request) {
         i++
       }
 
-      query := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quoteIdent(req.Name), strings.Join(cols, ", "), strings.Join(ph, ", "))
-      res, err := tx.Exec(query, args...)
+      query := ""
+      if len(cols) == 0 {
+        query = fmt.Sprintf("INSERT INTO %s DEFAULT VALUES RETURNING *", quoteIdent(req.Name))
+      } else {
+        query = fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s) RETURNING *", quoteIdent(req.Name), strings.Join(cols, ", "), strings.Join(ph, ", "))
+      }
+
+      rows, err := tx.Query(query, args...)
       if err != nil {
         writeJSON(w, http.StatusBadRequest, map[string]interface{}{"success": false, "message": err.Error()})
         return
       }
-      rc, _ := res.RowsAffected()
-      affected += rc
+
+      colsReturned, _ := rows.Columns()
+      for rows.Next() {
+        vals := make([]interface{}, len(colsReturned))
+        ptrs := make([]interface{}, len(colsReturned))
+        for i := range vals {
+          ptrs[i] = &vals[i]
+        }
+        if err := rows.Scan(ptrs...); err != nil {
+          rows.Close()
+          writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"success": false, "message": err.Error()})
+          return
+        }
+
+        m := map[string]interface{}{}
+        for i, c := range colsReturned {
+          m[c] = vals[i]
+        }
+        insertedRows = append(insertedRows, m)
+        affected += 1
+      }
+      rows.Close()
     }
+
+    results = append(results, map[string]interface{}{
+      "name": req.Name,
+      "records": insertedRows,
+    })
   }
 
   if err := tx.Commit(); err != nil {
@@ -676,7 +780,7 @@ func handleInsert(w http.ResponseWriter, r *http.Request) {
     return
   }
 
-  writeJSON(w, http.StatusOK, map[string]interface{}{"success": true, "affected": affected})
+  writeJSON(w, http.StatusOK, map[string]interface{}{"success": true, "affected": affected, "results": results})
 }
 
 func handleUpdate(w http.ResponseWriter, r *http.Request) {
@@ -727,6 +831,10 @@ func handleUpdate(w http.ResponseWriter, r *http.Request) {
     setParts := []string{}
     args := []interface{}{}
     for k, v := range req.Values {
+      if isProtectedIdentityColumn(payload.Database, req.Name, k) {
+        writeJSON(w, http.StatusBadRequest, map[string]interface{}{"success": false, "message": "id is auto-generated and cannot be updated"})
+        return
+      }
       if !columnExists(payload.Database, req.Name, k) {
         writeJSON(w, http.StatusBadRequest, map[string]interface{}{"success": false, "message": "invalid update column: " + k})
         return
@@ -735,7 +843,7 @@ func handleUpdate(w http.ResponseWriter, r *http.Request) {
       setParts = append(setParts, fmt.Sprintf("%s = $%d", quoteIdent(k), len(args)))
     }
 
-    whereSQL, err := buildWhereClause(payload.Database, req.Name, req.Name, req.SearchCriteria, req.LogicalOp, &args)
+    whereSQL, err := buildWhereClause(payload.Database, req.Name, req.Name, req.SearchCriteria, &args)
     if err != nil {
       writeJSON(w, http.StatusBadRequest, map[string]interface{}{"success": false, "message": err.Error()})
       return
@@ -805,7 +913,7 @@ func handleDelete(w http.ResponseWriter, r *http.Request) {
     }
 
     args := []interface{}{}
-    whereSQL, err := buildWhereClause(payload.Database, req.Name, req.Name, req.SearchCriteria, req.LogicalOp, &args)
+    whereSQL, err := buildWhereClause(payload.Database, req.Name, req.Name, req.SearchCriteria, &args)
     if err != nil {
       writeJSON(w, http.StatusBadRequest, map[string]interface{}{"success": false, "message": err.Error()})
       return
@@ -949,6 +1057,11 @@ go run .
 - gRPC: localhost:50051
 - GraphQL: http://localhost:8081/graphql
 
+## Database Layout Export
+
+- \`db-layout.json\` is generated in this folder whenever DataGateway is generated.
+- You can import this file back into the Database modal to recreate connection and table definitions.
+
 ## REST API
 
 ### Query Endpoints
@@ -971,10 +1084,10 @@ go run .
   "request": {
     "name": "Account",
     "searchCriteria": {
+      "logicalOp": "or",
       "clientNum": "2220",
       "app": "1234",
       "status": {
-        "logicalOp": "or",
         "conditions": [
           { "op": "eq", "value": "active" },
           { "op": "eq", "value": "pending" }
@@ -986,12 +1099,12 @@ go run .
       "table": "Customer",
       "type": "inner",
       "searchCriteria": {
-        "clientNum": "t0.clientNum",
-        "app": { "op": "gt", "ref": "t0.app" }
+        "clientNum": "Account.clientNum",
+        "app": { "op": "gt", "ref": "Account.app" }
       }
     },
     "orderBy": [
-      { "field": "t0.clientNum", "dir": "asc" }
+      { "field": "Account.clientNum", "dir": "asc" }
     ]
   }
 }

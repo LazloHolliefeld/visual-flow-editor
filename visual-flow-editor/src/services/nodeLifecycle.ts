@@ -1,11 +1,13 @@
 import type { Edge, Node } from '@xyflow/react';
 import type { ServiceNodeData } from '../nodes/ServiceNode';
 import type { DatabaseNodeData } from '../nodes/DatabaseNode';
+import type { ApiContract } from '../types/apiContract';
 
 export type ProjectGraphData = {
+  projectName?: string;
   projectNodes: Node[];
   projectEdges: Edge[];
-  serviceFlows: Record<string, { nodes: Node[]; edges: Edge[] }>;
+  serviceFlows: Record<string, { nodes: Node[]; edges: Edge[]; apiContracts?: ApiContract[] }>;
 };
 
 export type CallbackBinderDeps = {
@@ -43,6 +45,17 @@ const CALLBACK_KEYS = [
   'onStop',
 ] as const;
 
+export const PROJECT_CANVAS_NODE_TYPES = ['database', 'service', 'dataGateway'] as const;
+export const SERVICE_CANVAS_NODE_TYPES = ['request', 'action', 'decision', 'loop', 'apiCall', 'startEnd'] as const;
+
+export function isProjectCanvasNodeType(type: string | undefined): boolean {
+  return PROJECT_CANVAS_NODE_TYPES.includes((type || '') as (typeof PROJECT_CANVAS_NODE_TYPES)[number]);
+}
+
+export function isServiceCanvasNodeType(type: string | undefined): boolean {
+  return SERVICE_CANVAS_NODE_TYPES.includes((type || '') as (typeof SERVICE_CANVAS_NODE_TYPES)[number]);
+}
+
 export function getDefaultNodeData(type: string): Record<string, unknown> {
   switch (type) {
     case 'startEnd':
@@ -68,6 +81,14 @@ export function stripNodeCallbacks(node: Node): Node {
     data[key] = undefined;
   }
   return { ...node, data };
+}
+
+export function filterProjectCanvasNodes(nodes: Node[]): Node[] {
+  return nodes.filter((node) => isProjectCanvasNodeType(node.type));
+}
+
+export function filterServiceCanvasNodes(nodes: Node[]): Node[] {
+  return nodes.filter((node) => isServiceCanvasNodeType(node.type));
 }
 
 export function attachProjectNodeCallbacks(node: Node, deps: CallbackBinderDeps): Node {
@@ -169,6 +190,19 @@ export function createProjectNode(
     };
   }
 
+  return {
+    id: nodeId,
+    type,
+    position,
+    data: getDefaultNodeData(type),
+  };
+}
+
+export function createServiceCanvasNode(
+  type: string,
+  nodeId: string,
+  position: { x: number; y: number }
+): Node {
   return {
     id: nodeId,
     type,

@@ -17,19 +17,26 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { nodeTypes } from './nodes';
-import type { DatabaseNodeData } from './nodes';
+import type { DatabaseNodeData, RequestNodeData } from './nodes';
 import type { ServiceNodeData } from './nodes/ServiceNode';
+import type { ApiContract } from './types/apiContract';
 import type { DataGatewayNodeData } from './nodes/DataGatewayNode';
 import { DatabaseConfigModal } from './components/DatabaseConfigModal';
 import { ConfirmDialog } from './components/ConfirmDialog';
 import { ServiceConfigModal } from './components/ServiceConfigModal';
 import { DataGatewayViewModal } from './components/DataGatewayViewModal';
+import { ApiRequestBuilderModal } from './components/ApiRequestBuilderModal';
 import {
   attachProjectNodeCallbacks,
+  createServiceCanvasNode,
   createProjectNode,
+  filterProjectCanvasNodes,
+  filterServiceCanvasNodes,
   getDatabaseDropPayload,
   getProjectNodeDeletionTargets,
   getDefaultNodeData,
+  isProjectCanvasNodeType,
+  isServiceCanvasNodeType,
   removeNodeFromProjectData,
   stripNodeCallbacks,
 } from './services/nodeLifecycle';
@@ -47,18 +54,45 @@ interface CanvasContext {
 
 // Project data structure
 interface ProjectData {
+  projectName?: string;
   // Project-level nodes (databases, services, datagateway)
   projectNodes: Node[];
   projectEdges: Edge[];
   // Per-service flow data
-  serviceFlows: Record<string, { nodes: Node[]; edges: Edge[] }>;
+  serviceFlows: Record<string, { nodes: Node[]; edges: Edge[]; apiContracts?: ApiContract[] }>;
 }
 
 const EMPTY_PROJECT: ProjectData = {
+  projectName: 'project',
   projectNodes: [],
   projectEdges: [],
   serviceFlows: {},
 };
+
+const DATAGATEWAY_NODE_ID = 'dataGateway';
+const DATAGATEWAY_EDGE_PREFIX = 'db-to-datagateway:';
+function isManagedDataGatewayEdge(edge: Edge): boolean {
+  return edge.id.startsWith(DATAGATEWAY_EDGE_PREFIX);
+}
+
+function buildManagedDataGatewayEdges(dbNodes: Node[]): Edge[] {
+  return dbNodes.map((dbNode) => ({
+    id: `${DATAGATEWAY_EDGE_PREFIX}${dbNode.id}`,
+    source: dbNode.id,
+    target: DATAGATEWAY_NODE_ID,
+    animated: true,
+    label: 'feeds schema',
+  }));
+}
+
+function mergeWithManagedDataGatewayEdges(existingEdges: Edge[], managedEdges: Edge[]): Edge[] {
+  return [...existingEdges.filter((edge) => !isManagedDataGatewayEdge(edge)), ...managedEdges];
+}
+
+function filterProjectLevelEdges(projectNodes: Node[], allEdges: Edge[]): Edge[] {
+  const projectNodeIds = new Set(projectNodes.map((node) => node.id));
+  return allEdges.filter((edge) => projectNodeIds.has(edge.source) && projectNodeIds.has(edge.target));
+}
 
 function App() {
   // Canvas context - where we are
@@ -87,6 +121,7 @@ function App() {
   const [selectedServiceNode, setSelectedServiceNode] = useState<string | null>(null);
   const [isServiceModalOpen, setIsServiceModalOpen] = useState(false);
   const [isDataGatewayModalOpen, setIsDataGatewayModalOpen] = useState(false);
+  const [isApiRequestModalOpen, setIsApiRequestModalOpen] = useState(false);
   
   // Confirm dialog
   const [confirmDialog, setConfirmDialog] = useState<{
@@ -106,6 +141,11 @@ function App() {
   // DataGateway running state
   const [isDataGatewayRunning, setIsDataGatewayRunning] = useState(false);
   const [dataGatewayUrls, setDataGatewayUrls] = useState<{ rest?: string; grpc?: string; graphql?: string } | null>(null);
+
+  const currentProjectName = useMemo(() => {
+    const raw = String(projectData.projectName || '').trim();
+    return raw || 'project';
+  }, [projectData.projectName]);
   
   const saveTimeoutRef = useRef<number | null>(null);
   const isInitialLoadRef = useRef(true);
@@ -192,29 +232,72 @@ function App() {
     }
   }, []);
 
+  // Generate request nodes from APIcontracts
+  const generateRequestNodesFromContracts = useCallback((contracts: ApiContract[]): Node<RequestNodeData>[] => {
+    const requestNodes: Node<RequestNodeData>[] = [];
+    const contractsToUse = contracts || [];
+
+    for (let i = 0; i < contractsToUse.length; i++) {
+      const contract = contractsToUse[i];
+      const nodeId = `request-${contract.id}`;
+
+      requestNodes.push({
+        id: nodeId,
+        type: 'request',
+        position: { x: 50 + i * 220, y: 50 },
+        data: {
+          contract,
+          onEdit: () => setIsApiRequestModalOpen(true),
+        } as RequestNodeData,
+      });
+    }
+
+    return requestNodes;
+  }, []);
+
   // Keep canvas state in sync with loaded/saved project data and current context.
   useEffect(() => {
     if (canvasContext.type === 'project') {
-      setNodes(projectData.projectNodes);
-      setEdges(projectData.projectEdges);
+      const projectNodes = filterProjectCanvasNodes(projectData.projectNodes);
+      const projectEdges = filterProjectLevelEdges(projectNodes, projectData.projectEdges);
+      setNodes(projectNodes);
+      setEdges(projectEdges);
     } else if (canvasContext.serviceId) {
-      const flow = projectData.serviceFlows[canvasContext.serviceId] || { nodes: [], edges: [] };
-      setNodes(flow.nodes);
+      const flow = projectData.serviceFlows[canvasContext.serviceId] || { nodes: [], edges: [], apiContracts: [] };
+      const requestNodes = generateRequestNodesFromContracts(flow.apiContracts || []);
+      const flowNodes = filterServiceCanvasNodes(flow.nodes).filter((node) => node.type !== 'request');
+      const allNodes = [...requestNodes, ...flowNodes];
+      setNodes(allNodes);
       setEdges(flow.edges);
     }
-  }, [canvasContext, projectData]);
+  }, [canvasContext, projectData, generateRequestNodesFromContracts]);
 
   // Sync current nodes/edges back to project data
   const syncToProjectData = useCallback((newNodes: Node[], newEdges: Edge[]) => {
     setProjectData((prev) => {
       if (canvasContext.type === 'project') {
-        return { ...prev, projectNodes: newNodes, projectEdges: newEdges };
+        const projectNodes = filterProjectCanvasNodes(newNodes);
+        const projectEdges = filterProjectLevelEdges(projectNodes, newEdges);
+
+        if (projectNodes.length !== newNodes.length) {
+          console.warn('[project-sync] filtered non-project nodes from project canvas state', {
+            droppedNodeTypes: newNodes.filter((node) => !isProjectCanvasNodeType(node.type)).map((node) => node.type),
+          });
+        }
+
+        return { ...prev, projectNodes, projectEdges };
       } else if (canvasContext.serviceId) {
+        const persistedNodes = filterServiceCanvasNodes(newNodes).filter((n) => n.type !== 'request');
+        const existingFlow = prev.serviceFlows[canvasContext.serviceId] || { nodes: [], edges: [], apiContracts: [] };
         return {
           ...prev,
           serviceFlows: {
             ...prev.serviceFlows,
-            [canvasContext.serviceId]: { nodes: newNodes, edges: newEdges },
+            [canvasContext.serviceId]: {
+              ...existingFlow,
+              nodes: persistedNodes,
+              edges: newEdges,
+            },
           },
         };
       }
@@ -267,7 +350,63 @@ function App() {
     return { ...data, projectNodes: restoreProjectNodes };
   };
 
-  // Auto-save
+  // Immediate save function for critical actions
+  const saveProjectImmediately = useCallback(async (data: ProjectData) => {
+    try {
+      setSaveStatus('saving');
+      const dataToSave = stripCallbacks(data);
+      dataToSave.projectNodes = filterProjectCanvasNodes(dataToSave.projectNodes);
+      dataToSave.projectEdges = filterProjectLevelEdges(dataToSave.projectNodes, dataToSave.projectEdges);
+      dataToSave.serviceFlows = Object.fromEntries(
+        Object.entries(dataToSave.serviceFlows).map(([serviceId, flow]) => [
+          serviceId,
+          {
+            ...flow,
+            nodes: filterServiceCanvasNodes(flow.nodes).filter((node) => node.type !== 'request'),
+          },
+        ])
+      );
+
+      console.log('[project-save]', {
+        projectNodeTypes: dataToSave.projectNodes.map((node) => node.type),
+        projectNodeCount: dataToSave.projectNodes.length,
+        serviceFlowIds: Object.keys(dataToSave.serviceFlows),
+      });
+      
+      const response = await fetch(`${API_BASE}/api/project/save`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectData: dataToSave }),
+      });
+      
+      const result = await response.json();
+      setSaveStatus(result.success ? 'saved' : 'error');
+      if (!result.success) {
+        console.error('Save failed:', result.message);
+      }
+      return result.success;
+    } catch (error) {
+      console.error('Failed to save:', error);
+      setSaveStatus('error');
+      return false;
+    }
+  }, []);
+
+  // Save before page unload (browser tab close, navigation, etc.)
+  useEffect(() => {
+    const handleBeforeUnload = async () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+      // Attempt to save immediately before unload
+      await saveProjectImmediately(projectData);
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [projectData, saveProjectImmediately]);
+
+  // Auto-save (debounced for regular changes)
   useEffect(() => {
     if (isInitialLoadRef.current || isLoading) return;
     
@@ -277,39 +416,26 @@ function App() {
     
     setSaveStatus('saving');
     
+    // More aggressive debounce timing to reduce data loss risk
     saveTimeoutRef.current = window.setTimeout(async () => {
-      try {
-        // Strip callbacks before saving
-        const dataToSave = stripCallbacks(projectData);
-        
-        const response = await fetch(`${API_BASE}/api/project/save`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ projectData: dataToSave }),
-        });
-        
-        const result = await response.json();
-        setSaveStatus(result.success ? 'saved' : 'error');
-      } catch (error) {
-        console.error('Failed to save:', error);
-        setSaveStatus('error');
-      }
-    }, 1000);
+      await saveProjectImmediately(projectData);
+    }, 500);
     
     return () => {
       if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
     };
-  }, [projectData, isLoading]);
+  }, [projectData, isLoading, saveProjectImmediately]);
 
   // Strip callbacks for serialization
   const stripCallbacks = (data: ProjectData): ProjectData => {
     return {
+      projectName: data.projectName,
       projectNodes: data.projectNodes.map(stripNodeCallbacks),
       projectEdges: data.projectEdges,
       serviceFlows: Object.fromEntries(
         Object.entries(data.serviceFlows).map(([k, v]) => [
           k,
-          { nodes: v.nodes.map(stripNodeCallbacks), edges: v.edges },
+          { ...v, nodes: v.nodes.map(stripNodeCallbacks), edges: v.edges },
         ])
       ),
     };
@@ -328,7 +454,12 @@ function App() {
 
   // Drill into service
   const drillIntoService = useCallback((serviceId: string, serviceName: string) => {
-    // Save current project-level state first
+    console.log('[service-nav] drill into service', {
+      serviceId,
+      serviceName,
+      projectNodeTypes: nodes.map((node) => node.type),
+    });
+
     syncToProjectData(nodes, edges);
     
     // Initialize service flow if doesn't exist
@@ -339,21 +470,9 @@ function App() {
           serviceFlows: {
             ...prev.serviceFlows,
             [serviceId]: {
-              nodes: [
-                {
-                  id: `${serviceId}-start`,
-                  type: 'startEnd',
-                  position: { x: 250, y: 50 },
-                  data: { label: 'Start', type: 'start' },
-                },
-                {
-                  id: `${serviceId}-end`,
-                  type: 'startEnd',
-                  position: { x: 250, y: 400 },
-                  data: { label: 'End', type: 'end' },
-                },
-              ],
+              nodes: [],
               edges: [],
+              apiContracts: [],
             },
           },
         };
@@ -366,9 +485,21 @@ function App() {
 
   // Navigate back to project
   const navigateToProject = useCallback(() => {
+    console.log('[service-nav] back to project', {
+      serviceId: canvasContext.serviceId,
+      currentNodeTypes: nodes.map((node) => node.type),
+      currentEdgeCount: edges.length,
+    });
+
     syncToProjectData(nodes, edges);
     setCanvasContext({ type: 'project' });
-  }, [nodes, edges, syncToProjectData]);
+  }, [canvasContext.serviceId, nodes, edges, syncToProjectData]);
+
+  useEffect(() => {
+    if (canvasContext.type !== 'service' && isApiRequestModalOpen) {
+      setIsApiRequestModalOpen(false);
+    }
+  }, [canvasContext.type, isApiRequestModalOpen]);
 
   // Shared delete path for node-specific side effects + state removal.
   const deleteNodeByType = useCallback(async (nodeId: string, nodeType: string) => {
@@ -463,12 +594,24 @@ function App() {
     const nodeId = `${type}-${Date.now()}`;
     const position = { x: 100 + Math.random() * 200, y: 100 + Math.random() * 200 };
 
-    const newNode = createProjectNode(type, nodeId, position, {
-      openDbConfigById,
-      openServiceConfigById,
-      confirmDeleteNode,
-      drillIntoService,
-    });
+    if (canvasContext.type === 'project' && !isProjectCanvasNodeType(type)) {
+      console.warn('[canvas-boundary] blocked non-project node on project canvas', { type });
+      return;
+    }
+
+    if (canvasContext.type === 'service' && !isServiceCanvasNodeType(type)) {
+      console.warn('[canvas-boundary] blocked non-service node on service canvas', { type });
+      return;
+    }
+
+    const newNode = canvasContext.type === 'project'
+      ? createProjectNode(type, nodeId, position, {
+          openDbConfigById,
+          openServiceConfigById,
+          confirmDeleteNode,
+          drillIntoService,
+        })
+      : createServiceCanvasNode(type, nodeId, position);
     
     const newNodes = [...nodes, newNode];
     setNodes(newNodes);
@@ -486,7 +629,7 @@ function App() {
         setIsServiceModalOpen(true);
       }, 100);
     }
-  }, [nodes, edges, openDbConfigById, openServiceConfigById, confirmDeleteNode, drillIntoService, syncToProjectData]);
+  }, [canvasContext.type, nodes, edges, openDbConfigById, openServiceConfigById, confirmDeleteNode, drillIntoService, syncToProjectData]);
 
   // Update DataGateway when databases change
   useEffect(() => {
@@ -494,6 +637,7 @@ function App() {
     
     const dbNodes = projectData.projectNodes.filter((n) => n.type === 'database');
     const existingGateway = projectData.projectNodes.find((n) => n.type === 'dataGateway');
+    const managedGatewayEdges = buildManagedDataGatewayEdges(dbNodes);
     
     if (dbNodes.length > 0 && !existingGateway) {
       // Create DataGateway (first database added)
@@ -517,7 +661,7 @@ function App() {
       };
       
       const gatewayNode: Node = {
-        id: 'dataGateway',
+        id: DATAGATEWAY_NODE_ID,
         type: 'dataGateway',
         position: { x: 400, y: 100 },
         data: gatewayData as unknown as Record<string, unknown>,
@@ -525,9 +669,11 @@ function App() {
       
       // Update both nodes (for React Flow) and projectData (for persistence)
       setNodes((prev) => [...prev, gatewayNode]);
+      setEdges((prev) => mergeWithManagedDataGatewayEdges(prev, managedGatewayEdges));
       setProjectData((prev) => ({
         ...prev,
         projectNodes: [...prev.projectNodes, gatewayNode],
+        projectEdges: mergeWithManagedDataGatewayEdges(prev.projectEdges, managedGatewayEdges),
       }));
     } else if (dbNodes.length > 0 && existingGateway) {
       // Update DataGateway (database/table/column changes)
@@ -557,6 +703,7 @@ function App() {
             }
           : n
       ));
+      setEdges((prev) => mergeWithManagedDataGatewayEdges(prev, managedGatewayEdges));
       
       // Update projectData for persistence
       setProjectData((prev) => ({
@@ -566,13 +713,16 @@ function App() {
             ? { ...n, data: { ...n.data, databases: updatedDatabases } }
             : n
         ),
+        projectEdges: mergeWithManagedDataGatewayEdges(prev.projectEdges, managedGatewayEdges),
       }));
     } else if (dbNodes.length === 0 && existingGateway) {
       // Remove DataGateway (all databases removed)
       setNodes((prev) => prev.filter((n) => n.type !== 'dataGateway'));
+      setEdges((prev) => prev.filter((e) => e.source !== DATAGATEWAY_NODE_ID && e.target !== DATAGATEWAY_NODE_ID));
       setProjectData((prev) => ({
         ...prev,
         projectNodes: prev.projectNodes.filter((n) => n.type !== 'dataGateway'),
+        projectEdges: prev.projectEdges.filter((e) => e.source !== DATAGATEWAY_NODE_ID && e.target !== DATAGATEWAY_NODE_ID),
       }));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -625,11 +775,7 @@ function App() {
       ...prev,
       projectNodes: prev.projectNodes.map(updateNodeData),
     }));
-
-    // Keep running DataGateway in sync with latest schema metadata.
-    const nextProjectData = buildProjectDataWithDbUpdate(data);
-    void restartDataGatewayIfRunning(nextProjectData);
-  }, [selectedDbNode, openDbConfigById, confirmDeleteNode, buildProjectDataWithDbUpdate, restartDataGatewayIfRunning]);
+  }, [selectedDbNode, openDbConfigById, confirmDeleteNode]);
 
   // Save service config
   const handleSaveServiceConfig = useCallback((data: ServiceNodeData) => {
@@ -700,6 +846,7 @@ function App() {
         body: JSON.stringify({
           projectData: dataToSend,
           githubUsername: GITHUB_USERNAME,
+          projectName: currentProjectName,
         }),
       });
       
@@ -716,7 +863,26 @@ function App() {
     } finally {
       setIsGenerating(false);
     }
-  }, [projectData]);
+  }, [projectData, currentProjectName]);
+
+  const handleRenameProject = useCallback(() => {
+    const current = currentProjectName;
+    const next = window.prompt('Project name (used as repo prefix):', current);
+    if (next === null) return;
+
+    const trimmed = next.trim();
+    if (!trimmed) {
+      alert('Project name cannot be empty.');
+      return;
+    }
+
+    setProjectData((prev) => ({
+      ...prev,
+      projectName: trimmed,
+    }));
+
+    console.log('[project] renamed', { from: current, to: trimmed });
+  }, [currentProjectName]);
 
   // Get data for modals
   const selectedDbData = useMemo(() => {
@@ -740,6 +906,54 @@ function App() {
     };
   }, [projectData.projectNodes]);
 
+  const currentServiceContracts = useMemo(() => {
+    if (canvasContext.type !== 'service' || !canvasContext.serviceId) return [] as ApiContract[];
+    return projectData.serviceFlows[canvasContext.serviceId]?.apiContracts || [];
+  }, [canvasContext, projectData.serviceFlows]);
+
+  const handleSaveApiContracts = useCallback((contracts: ApiContract[]) => {
+    if (canvasContext.type !== 'service' || !canvasContext.serviceId) return;
+
+    const serviceId = canvasContext.serviceId;
+    console.log('[contracts] saving contracts', {
+      serviceId,
+      contractCount: contracts.length,
+      contractNames: contracts.map((contract) => contract.name),
+    });
+
+    const endpointSummary = contracts.map((contract) => ({
+      method: contract.method,
+      path: contract.path,
+      description: contract.description,
+    }));
+
+    setProjectData((prev) => {
+      const flow = prev.serviceFlows[serviceId] || { nodes: [], edges: [], apiContracts: [] };
+      return {
+        ...prev,
+        projectNodes: prev.projectNodes.map((node) =>
+          node.id === serviceId && node.type === 'service'
+            ? {
+                ...node,
+                data: {
+                  ...node.data,
+                  apiContracts: contracts,
+                  endpoints: endpointSummary,
+                },
+              }
+            : node
+        ),
+        serviceFlows: {
+          ...prev.serviceFlows,
+          [serviceId]: {
+            ...flow,
+            apiContracts: contracts,
+          },
+        },
+      };
+    });
+  }, [canvasContext]);
+
   if (isLoading) {
     return (
       <div className="app-container loading-screen">
@@ -757,7 +971,7 @@ function App() {
             className={`breadcrumb-item ${canvasContext.type === 'project' ? 'active' : ''}`}
             onClick={navigateToProject}
           >
-            📁 Project
+            📁 {currentProjectName}
           </button>
           {canvasContext.type === 'service' && (
             <>
@@ -783,10 +997,11 @@ function App() {
             <Controls />
             
             <Panel position="top-left" className="node-palette">
-              <h3>{canvasContext.type === 'project' ? 'Project' : canvasContext.serviceName}</h3>
+              <h3>{canvasContext.type === 'project' ? currentProjectName : canvasContext.serviceName}</h3>
               
               {canvasContext.type === 'project' && (
                 <>
+                  <button onClick={handleRenameProject}>✏️ Rename Project</button>
                   <button onClick={() => addNode('database')}>⛁ Database</button>
                   <button onClick={() => addNode('service')}>🔌 API Service</button>
                 </>
@@ -794,7 +1009,7 @@ function App() {
               
               {canvasContext.type === 'service' && (
                 <>
-                  <button onClick={() => addNode('startEnd')}>⬭ Start/End</button>
+                  <button onClick={() => setIsApiRequestModalOpen(true)}>📝 Define Request</button>
                   <button onClick={() => addNode('action')}>▭ Action</button>
                   <button onClick={() => addNode('decision')}>◇ Decision</button>
                   <button onClick={() => addNode('loop')}>⬡ Loop</button>
@@ -878,6 +1093,14 @@ function App() {
           isOpen={isDataGatewayModalOpen}
           data={dataGatewayData}
           onClose={() => setIsDataGatewayModalOpen(false)}
+        />
+
+        <ApiRequestBuilderModal
+          isOpen={isApiRequestModalOpen}
+          serviceName={canvasContext.serviceName}
+          contracts={currentServiceContracts}
+          onSave={handleSaveApiContracts}
+          onClose={() => setIsApiRequestModalOpen(false)}
         />
         
         <ConfirmDialog

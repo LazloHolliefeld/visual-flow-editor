@@ -203,6 +203,11 @@ app.post('/api/generate/push-to-github', async (req, res) => {
 // ===== NEW: Generate and push to per-service repos =====
 app.post('/api/generate/push-all', async (req, res) => {
   try {
+    console.log('[push-all] request', {
+      projectName: req.body?.projectData?.projectName || req.body?.projectName || 'project',
+      projectNodeCount: req.body?.projectData?.projectNodes?.length || 0,
+    });
+
     const result = await pushAllGeneratedRepos({
       projectData: req.body?.projectData,
       githubUsername: req.body?.githubUsername,

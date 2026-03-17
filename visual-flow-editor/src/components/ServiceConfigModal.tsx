@@ -66,7 +66,7 @@ export function ServiceConfigModal({
           </div>
 
           <div className="info-box">
-            <strong>💡 Tip:</strong> Double-click the service node to drill down and define its logic using flow nodes.
+            <strong>💡 Tip:</strong> Double-click the service node, then use <code>Define Request</code> in the toolbox to build REST contracts that auto-generate GraphQL and gRPC stubs.
           </div>
         </div>
 

@@ -36,7 +36,9 @@ After making code changes, **always update documentation** if the change affects
 
 ### Two-Level Canvas System
 1. **Project Level** (main view): Contains Database nodes, API Service nodes, and auto-generated DataGateway
-2. **Service Level** (drill-down): Contains flow logic nodes (Start/End, Action, Decision, Loop, API Call)
+2. **Service Level** (drill-down): Contains request-contract builder plus flow logic nodes (Request, Action, Decision, Loop, API Call)
+
+Canvas boundary rule: project canvas node state and service canvas node state must stay segregated. `request` nodes are derived from saved contracts and must never be persisted into `projectNodes`.
 
 Navigation: Breadcrumb at top (`📁 Project > 🔌 ServiceName`)
 
@@ -65,6 +67,7 @@ Navigation: Breadcrumb at top (`📁 Project > 🔌 ServiceName`)
 - `dataGateway` (🗄️) - Auto-generated from databases, read-only
 
 **Service Level:**
+- `request` (📨) - Auto-generated incoming request node derived from saved contract, read-only in canvas
 - `startEnd` (⬭) - Flow entry/exit points
 - `action` (▭) - Execute code
 - `decision` (◇) - IF/ELSE branching
@@ -74,7 +77,8 @@ Navigation: Breadcrumb at top (`📁 Project > 🔌 ServiceName`)
 ### Data Flow
 
 ```
-User adds Database → DataGateway auto-created → 
+User adds Database → DataGateway auto-created + auto-connected in canvas → 
+User opens Service → Define Request (REST contract) → GraphQL/gRPC stubs derived from same contract →
 User clicks "Generate & Push" →
   - DataGateway repo created with REST/gRPC/GraphQL
   - Each Service gets its own repo
@@ -187,10 +191,15 @@ Edit `server/index.js`:
 7. **New Project cleanup** - ✅ FIXED: Hitting "New Project" now properly drops all PostgreSQL databases via the unified delete pipeline
 8. **Database modal persistence** - ✅ FIXED: Form data now saved immediately on "Create Database" click before provisioning
 9. **Delete pipeline** - ✅ FIXED: Single-node delete and batch operations (New Project) unified; database nodes trigger `POST /api/db/drop`
-10. **DataGateway query contract** - ✅ DONE: Generated gateway uses body-driven query endpoints (`/api/query/fetch|insert|update|delete`) with joins, operators, and validation
-11. **Composite primary keys** - ✅ FIXED: Multiple PK checkboxes now generate a single table-level `PRIMARY KEY (col1, col2, ...)` constraint
+10. **DataGateway query contract** - ✅ DONE: Generated gateway uses body-driven query endpoints (`/api/query/fetch|insert|update|delete`) with joins/operators/validation; `logicalOp` is read from inside `searchCriteria` (defaults to `AND`) and mixed `AND`/`OR` criteria trees are rejected
+11. **Primary key behavior** - ✅ UPDATED: `id` is always enforced as `BIGINT GENERATED ALWAYS AS IDENTITY` and is always included in the table PK; user-selected PK columns are preserved to form a composite PK with `id`
 12. **DataGateway DB auth** - ✅ FIXED: Generated DataGateway now tries `PGPASSWORD`, then node-configured DB password, then `postgres` fallback
 13. **DataGateway lifecycle sync** - ✅ FIXED: Stop now kills orphan processes on DataGateway ports; DB config save/create auto-restarts running DataGateway
+14. **Identity `id` enforcement** - ✅ FIXED: Table create/save auto-adds `id` when missing, syncs it to `BIGINT GENERATED ALWAYS AS IDENTITY`, and keeps `id` hidden from manual configuration in the DB modal
+15. **DataGateway `id` contract** - ✅ FIXED: Insert rejects client-provided `id`, update rejects mutating `id`, and insert returns inserted rows including generated `id`
+16. **Service request contracts** - ✅ NEW: Service toolbox now includes `Define Request`; service canvases initialize empty (no auto Start/End), and saved REST contracts drive generated REST handlers plus GraphQL/gRPC stub files
+17. **DB layout recovery** - ✅ NEW: DataGateway generation writes `db-layout.json`; Database modal can import this file to restore DB/table definitions quickly
+18. **Project-scoped repo naming** - ✅ NEW: Project canvas supports editable project name (default `project`); Generate & Push prefixes repos as `{projectName}_datagateway` and `{projectName}_{serviceName}`
 
 ## GitHub Repositories
 
@@ -209,3 +218,4 @@ Edit `server/index.js`:
 - [ ] Undo/redo system
 - [ ] Copy/paste nodes
 - [ ] Template library
+- [ ] Preview exact generated repo names in UI before push

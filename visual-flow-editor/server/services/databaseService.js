@@ -27,13 +27,17 @@ export async function getDatabaseClient(host, port, database, password = '') {
 }
 
 function buildTableColumnDefinitions(columns = []) {
-  const validColumns = columns.filter((col) => col && col.name);
+  const validColumns = enforceIdBestPractices(columns);
   const primaryKeyColumns = validColumns.filter((col) => col.isPrimaryKey);
 
   const defs = validColumns.map((col) => {
-    let def = `"${col.name}" ${col.type}`;
+    const isIdentityId = isIdentityIdColumn(col);
+    let def = `"${col.name}" ${isIdentityId ? 'BIGINT' : col.type}`;
+    if (isIdentityId) {
+      def += ' GENERATED ALWAYS AS IDENTITY';
+    }
     if (!col.isNullable && !col.isPrimaryKey) def += ' NOT NULL';
-    if (col.defaultValue) def += ` DEFAULT ${col.defaultValue}`;
+    if (col.defaultValue && !isIdentityId) def += ` DEFAULT ${col.defaultValue}`;
     return def;
   });
 
@@ -43,6 +47,207 @@ function buildTableColumnDefinitions(columns = []) {
   }
 
   return defs;
+}
+
+function isIdentityIdColumn(col) {
+  return Boolean(col && String(col.name || '').toLowerCase() === 'id');
+}
+
+function enforceIdBestPractices(columns = []) {
+  const valid = (columns || []).filter((col) => col && col.name);
+  const normalized = valid.map((col) => {
+    if (!isIdentityIdColumn(col)) {
+      return col;
+    }
+
+    return {
+      ...col,
+      type: 'BIGINT',
+      isPrimaryKey: true,
+      isNullable: false,
+      defaultValue: '',
+    };
+  });
+
+  const hasId = normalized.some((col) => isIdentityIdColumn(col));
+  const withoutId = normalized.filter((col) => !isIdentityIdColumn(col));
+
+  if (hasId) {
+    const enforcedId = {
+      name: 'id',
+      type: 'BIGINT',
+      isNullable: false,
+      isPrimaryKey: true,
+      defaultValue: '',
+    };
+    return [enforcedId, ...withoutId];
+  }
+
+  return [
+    {
+      name: 'id',
+      type: 'BIGINT',
+      isNullable: false,
+      isPrimaryKey: true,
+      defaultValue: '',
+    },
+    ...normalized,
+  ];
+}
+
+function quoteIdent(name) {
+  return `"${String(name).replace(/"/g, '""')}"`;
+}
+
+function normalizeType(type) {
+  const t = String(type || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  if (t === 'serial') return 'integer';
+  if (t === 'bigserial') return 'bigint';
+  if (t.startsWith('varchar(')) return t.replace('varchar', 'character varying');
+  if (t.startsWith('decimal(')) return t.replace('decimal', 'numeric');
+  if (t === 'float') return 'double precision';
+  return t;
+}
+
+function arraysEqual(a = [], b = []) {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
+async function syncTableSchema(dbClient, schemaName, table) {
+  const validColumns = enforceIdBestPractices(table.columns || []);
+  if (validColumns.length === 0) return;
+
+  const schemaIdent = quoteIdent(schemaName || 'public');
+  const tableIdent = quoteIdent(table.name);
+  const tableRef = `${schemaIdent}.${tableIdent}`;
+
+  const existingColsRes = await dbClient.query(
+    `SELECT a.attname AS column_name,
+            format_type(a.atttypid, a.atttypmod) AS column_type,
+            a.attnotnull AS is_not_null
+     FROM pg_attribute a
+     JOIN pg_class c ON c.oid = a.attrelid
+     JOIN pg_namespace n ON n.oid = c.relnamespace
+     WHERE n.nspname = $1
+       AND c.relname = $2
+       AND a.attnum > 0
+       AND NOT a.attisdropped`,
+    [schemaName || 'public', table.name]
+  );
+
+  const existingCols = new Map(existingColsRes.rows.map((r) => [r.column_name, r]));
+
+  for (const col of validColumns) {
+    const colIdent = quoteIdent(col.name);
+    const existing = existingCols.get(col.name);
+
+    if (!existing) {
+      let addSql = `ALTER TABLE ${tableRef} ADD COLUMN ${colIdent} ${col.type}`;
+      if (isIdentityIdColumn(col)) {
+        addSql = `ALTER TABLE ${tableRef} ADD COLUMN ${colIdent} BIGINT GENERATED ALWAYS AS IDENTITY`;
+      }
+      if (!col.isNullable && !col.isPrimaryKey) addSql += ' NOT NULL';
+      if (col.defaultValue && !isIdentityIdColumn(col)) addSql += ` DEFAULT ${col.defaultValue}`;
+      await dbClient.query(addSql);
+      if (isIdentityIdColumn(col)) {
+        await ensureIdentityAlways(dbClient, schemaName || 'public', table.name, col.name, tableRef);
+      }
+      continue;
+    }
+
+    const existingType = normalizeType(existing.column_type);
+    const desiredType = normalizeType(col.type);
+    if (existingType !== desiredType) {
+      await dbClient.query(
+        `ALTER TABLE ${tableRef} ALTER COLUMN ${colIdent} TYPE ${col.type} USING ${colIdent}::${col.type}`
+      );
+    }
+
+    const desiredNotNull = Boolean(col.isPrimaryKey || col.isNullable === false);
+    const isNotNull = Boolean(existing.is_not_null);
+    if (desiredNotNull && !isNotNull) {
+      await dbClient.query(`ALTER TABLE ${tableRef} ALTER COLUMN ${colIdent} SET NOT NULL`);
+    }
+    if (!desiredNotNull && isNotNull) {
+      await dbClient.query(`ALTER TABLE ${tableRef} ALTER COLUMN ${colIdent} DROP NOT NULL`);
+    }
+
+    if (!isIdentityIdColumn(col)) {
+      if (col.defaultValue) {
+        await dbClient.query(`ALTER TABLE ${tableRef} ALTER COLUMN ${colIdent} SET DEFAULT ${col.defaultValue}`);
+      } else {
+        await dbClient.query(`ALTER TABLE ${tableRef} ALTER COLUMN ${colIdent} DROP DEFAULT`);
+      }
+    }
+
+    if (isIdentityIdColumn(col)) {
+      await ensureIdentityAlways(dbClient, schemaName || 'public', table.name, col.name, tableRef);
+    }
+  }
+
+  const desiredPkCols = validColumns.filter((c) => c.isPrimaryKey).map((c) => c.name);
+  const pkRes = await dbClient.query(
+    `SELECT tc.constraint_name,
+            array_agg(kcu.column_name ORDER BY kcu.ordinal_position) AS columns
+     FROM information_schema.table_constraints tc
+     JOIN information_schema.key_column_usage kcu
+       ON tc.constraint_name = kcu.constraint_name
+      AND tc.table_schema = kcu.table_schema
+      AND tc.table_name = kcu.table_name
+     WHERE tc.table_schema = $1
+       AND tc.table_name = $2
+       AND tc.constraint_type = 'PRIMARY KEY'
+     GROUP BY tc.constraint_name`,
+    [schemaName || 'public', table.name]
+  );
+
+  const existingPk = pkRes.rows[0];
+  const existingPkCols = existingPk?.columns || [];
+
+  if (!arraysEqual(existingPkCols, desiredPkCols)) {
+    if (existingPk?.constraint_name) {
+      await dbClient.query(`ALTER TABLE ${tableRef} DROP CONSTRAINT ${quoteIdent(existingPk.constraint_name)}`);
+    }
+
+    if (desiredPkCols.length > 0) {
+      const pkColsSql = desiredPkCols.map((c) => quoteIdent(c)).join(', ');
+      await dbClient.query(`ALTER TABLE ${tableRef} ADD PRIMARY KEY (${pkColsSql})`);
+    }
+  }
+}
+
+async function ensureIdentityAlways(dbClient, schemaName, tableName, columnName, tableRef) {
+  const colIdent = quoteIdent(columnName);
+  const identityRes = await dbClient.query(
+    `SELECT is_identity, identity_generation
+     FROM information_schema.columns
+     WHERE table_schema = $1
+       AND table_name = $2
+       AND column_name = $3`,
+    [schemaName, tableName, columnName]
+  );
+
+  const meta = identityRes.rows[0];
+  if (meta?.is_identity === 'YES' && String(meta.identity_generation || '').toUpperCase() === 'ALWAYS') {
+    return;
+  }
+
+  // Identity cannot be added while an explicit default exists (serial/nextval or custom default).
+  await dbClient.query(`ALTER TABLE ${tableRef} ALTER COLUMN ${colIdent} DROP DEFAULT`);
+
+  try {
+    await dbClient.query(`ALTER TABLE ${tableRef} ALTER COLUMN ${colIdent} ADD GENERATED ALWAYS AS IDENTITY`);
+  } catch (error) {
+    const message = String(error?.message || '').toLowerCase();
+    if (!message.includes('is already an identity column')) {
+      throw error;
+    }
+    await dbClient.query(`ALTER TABLE ${tableRef} ALTER COLUMN ${colIdent} SET GENERATED ALWAYS`);
+  }
 }
 
 export function extractDatabaseSchemas(nodes = []) {
@@ -137,6 +342,7 @@ export async function createDatabaseAndTables({ host, port, database, schema, ta
     }
 
     const schemaPrefix = schema && schema !== 'public' ? `"${schema}".` : '';
+    const schemaName = schema || 'public';
 
     if (tables && tables.length > 0) {
       for (const table of tables) {
@@ -151,6 +357,7 @@ export async function createDatabaseAndTables({ host, port, database, schema, ta
           const createSQL = `CREATE TABLE IF NOT EXISTS ${schemaPrefix}"${table.name}" (${createColumnsSQL})`;
           console.log('Executing:', createSQL);
           await dbClient.query(createSQL);
+          await syncTableSchema(dbClient, schemaName, table);
           console.log(`Created table: ${table.name}`);
         }
       }

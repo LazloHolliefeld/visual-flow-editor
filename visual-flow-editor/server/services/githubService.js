@@ -1,9 +1,21 @@
 import fs from 'fs';
 import path from 'path';
 import { exec } from 'child_process';
+import { writeDatabaseLayoutFile } from './dbLayoutService.js';
 
 export function sanitizeRepoName(name) {
-  return name.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || 'unnamed-service';
+  return String(name || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/_+/g, '_')
+    .replace(/^[-_]+|[-_]+$/g, '') || 'unnamed-service';
+}
+
+function buildProjectScopedRepoName(projectName, suffix) {
+  const p = sanitizeRepoName(projectName || 'project');
+  const s = sanitizeRepoName(suffix || 'service');
+  return `${p}_${s}`;
 }
 
 export async function ensureGitHubRepo(username, repoName) {
@@ -135,7 +147,7 @@ export async function pushAllGeneratedRepos({
     return { success: false, message: 'No project data provided' };
   }
 
-  const { projectNodes, serviceFlows } = projectData;
+  const { projectName = 'project', projectNodes, serviceFlows } = projectData;
   const repos = [];
 
   const dbNodes = projectNodes.filter((n) => n.type === 'database' && n.data?.database);
@@ -154,6 +166,7 @@ export async function pushAllGeneratedRepos({
     fs.writeFileSync(path.join(gatewayDir, 'graphql.go'), gatewayCode.graphql);
     fs.writeFileSync(path.join(gatewayDir, 'go.mod'), gatewayCode.goMod);
     fs.writeFileSync(path.join(gatewayDir, 'README.md'), generateDataGatewayReadme(dbNodes));
+    writeDatabaseLayoutFile(gatewayDir, dbNodes);
 
     const schemaDir = path.join(gatewayDir, 'database');
     if (!fs.existsSync(schemaDir)) fs.mkdirSync(schemaDir, { recursive: true });
@@ -161,15 +174,16 @@ export async function pushAllGeneratedRepos({
       fs.writeFileSync(path.join(schemaDir, `${schema.database}_schema.sql`), schema.sql);
     }
 
-    const repoUrl = `https://github.com/${githubUsername}/datagateway.git`;
-    await ensureGitHubRepo(githubUsername, 'datagateway');
+    const dataGatewayRepoName = buildProjectScopedRepoName(projectName, 'DataGateway');
+    const repoUrl = `https://github.com/${githubUsername}/${dataGatewayRepoName}.git`;
+    await ensureGitHubRepo(githubUsername, dataGatewayRepoName);
     await pushToGitHub(gatewayDir, repoUrl, 'Update DataGateway');
-    repos.push({ name: 'datagateway', url: repoUrl });
+    repos.push({ name: dataGatewayRepoName, url: repoUrl });
   }
 
   for (const serviceNode of serviceNodes) {
-    const serviceName = sanitizeRepoName(serviceNode.data.name);
-    const serviceDir = path.join(workspaceRoot, serviceName);
+    const serviceRepoName = buildProjectScopedRepoName(projectName, serviceNode.data.name);
+    const serviceDir = path.join(workspaceRoot, serviceRepoName);
     if (!fs.existsSync(serviceDir)) fs.mkdirSync(serviceDir, { recursive: true });
 
     const flow = serviceFlows[serviceNode.id] || { nodes: [], edges: [] };
@@ -177,13 +191,22 @@ export async function pushAllGeneratedRepos({
 
     fs.writeFileSync(path.join(serviceDir, 'main.go'), serviceCode.main);
     fs.writeFileSync(path.join(serviceDir, 'handlers.go'), serviceCode.handlers);
+    if (serviceCode.graphql) {
+      fs.writeFileSync(path.join(serviceDir, 'graphql.go'), serviceCode.graphql);
+    }
+    if (serviceCode.grpc) {
+      fs.writeFileSync(path.join(serviceDir, 'grpc_server.go'), serviceCode.grpc);
+    }
+    if (serviceCode.proto) {
+      fs.writeFileSync(path.join(serviceDir, 'service.proto'), serviceCode.proto);
+    }
     fs.writeFileSync(path.join(serviceDir, 'go.mod'), serviceCode.goMod);
     fs.writeFileSync(path.join(serviceDir, 'README.md'), generateServiceReadme(serviceNode.data, flow));
 
-    const repoUrl = `https://github.com/${githubUsername}/${serviceName}.git`;
-    await ensureGitHubRepo(githubUsername, serviceName);
-    await pushToGitHub(serviceDir, repoUrl, `Update ${serviceName}`);
-    repos.push({ name: serviceName, url: repoUrl });
+    const repoUrl = `https://github.com/${githubUsername}/${serviceRepoName}.git`;
+    await ensureGitHubRepo(githubUsername, serviceRepoName);
+    await pushToGitHub(serviceDir, repoUrl, `Update ${serviceRepoName}`);
+    repos.push({ name: serviceRepoName, url: repoUrl });
   }
 
   return {

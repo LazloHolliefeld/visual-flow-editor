@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { execSync, exec } from 'child_process';
+import { writeDatabaseLayoutFile } from './dbLayoutService.js';
 
 const runningServers = new Map(); // Map<serviceName, { process, pid, urls, startedAt }>
 const DATAGATEWAY_PORTS = [8080, 8081, 50051];
@@ -103,6 +104,7 @@ export async function startDataGateway({ projectData, generateDataGateway, gatew
   fs.writeFileSync(path.join(gatewayDir, 'grpc_server.go'), gatewayCode.grpc);
   fs.writeFileSync(path.join(gatewayDir, 'graphql.go'), gatewayCode.graphql);
   fs.writeFileSync(path.join(gatewayDir, 'go.mod'), gatewayCode.goMod);
+  writeDatabaseLayoutFile(gatewayDir, dbNodes);
 
   try {
     execSync('go mod tidy', { cwd: gatewayDir, shell: 'cmd.exe', timeout: 30000 });

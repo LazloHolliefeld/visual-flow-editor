@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import type { ChangeEvent } from 'react';
 import type { TableDefinition, DatabaseNodeData } from '../nodes/DatabaseNode';
 
 const COLUMN_TYPES = [
@@ -26,6 +27,71 @@ type ColumnDefinition = {
   defaultValue: string;
 };
 
+type ImportedDatabaseLayout = {
+  label?: string;
+  connectionName?: string;
+  host?: string;
+  port?: number;
+  password?: string;
+  database?: string;
+  schema?: string;
+  tables?: TableDefinition[];
+};
+
+function isIdentityIdColumnName(name: string) {
+  return String(name || '').trim().toLowerCase() === 'id';
+}
+
+function normalizeColumnsWithHiddenIdentity(columns: ColumnDefinition[] = []): ColumnDefinition[] {
+  const nonIdColumns = columns.filter((c) => c && !isIdentityIdColumnName(c.name));
+  return [
+    {
+      name: 'id',
+      type: 'BIGINT',
+      isPrimaryKey: true,
+      isNullable: false,
+      defaultValue: '',
+    },
+    ...nonIdColumns,
+  ];
+}
+
+function toTableDefinition(table: TableDefinition): TableDefinition {
+  const columns = (Array.isArray(table?.columns) ? table.columns : [])
+    .filter((col) => col && col.name)
+    .map((col) => ({
+      name: col.name,
+      type: col.type || 'VARCHAR(255)',
+      isPrimaryKey: Boolean(col.isPrimaryKey),
+      isNullable: col.isNullable !== false,
+      defaultValue: col.defaultValue || '',
+    }));
+
+  return {
+    name: table.name,
+    columns,
+  };
+}
+
+function extractImportedDatabaseLayout(raw: unknown): ImportedDatabaseLayout | null {
+  if (!raw || typeof raw !== 'object') return null;
+
+  const payload = raw as Record<string, unknown>;
+
+  // Preferred format: { databases: [ ... ] }
+  if (Array.isArray(payload.databases) && payload.databases.length > 0) {
+    const first = payload.databases[0] as ImportedDatabaseLayout;
+    return first;
+  }
+
+  // Allow direct single-db object format
+  if (typeof payload.database === 'string' || Array.isArray(payload.tables)) {
+    return payload as ImportedDatabaseLayout;
+  }
+
+  return null;
+}
+
 type TableEditorProps = {
   table: TableDefinition;
   onUpdate: (table: TableDefinition) => void;
@@ -34,37 +100,45 @@ type TableEditorProps = {
 
 function TableEditor({ table, onUpdate, onDelete }: TableEditorProps) {
   const [columns, setColumns] = useState<ColumnDefinition[]>(
-    table.columns.map(c => ({
+    normalizeColumnsWithHiddenIdentity(table.columns.map(c => ({
       name: c.name,
       type: c.type,
       isPrimaryKey: c.isPrimaryKey || false,
       isNullable: c.isNullable !== false,
       defaultValue: c.defaultValue || '',
-    }))
+    })))
   );
 
   const addColumn = () => {
-    setColumns([...columns, {
+    const updated = normalizeColumnsWithHiddenIdentity([...columns, {
       name: '',
       type: 'VARCHAR(255)',
       isPrimaryKey: false,
       isNullable: true,
       defaultValue: '',
     }]);
+    setColumns(updated);
+    onUpdate({ ...table, columns: updated });
   };
 
   const updateColumn = (index: number, field: keyof ColumnDefinition, value: string | boolean) => {
     const updated = [...columns];
-    updated[index] = { ...updated[index], [field]: value };
+    const nextValue = field === 'name' && typeof value === 'string' && isIdentityIdColumnName(value) ? '' : value;
+    updated[index] = { ...updated[index], [field]: nextValue };
+    const normalized = normalizeColumnsWithHiddenIdentity(updated);
+    setColumns(normalized);
+    onUpdate({ ...table, columns: normalized });
+  };
+
+  const removeColumn = (index: number) => {
+    const updated = normalizeColumnsWithHiddenIdentity(columns.filter((_, i) => i !== index));
     setColumns(updated);
     onUpdate({ ...table, columns: updated });
   };
 
-  const removeColumn = (index: number) => {
-    const updated = columns.filter((_, i) => i !== index);
-    setColumns(updated);
-    onUpdate({ ...table, columns: updated });
-  };
+  const visibleColumns = columns
+    .map((col, index) => ({ col, index }))
+    .filter(({ col }) => !isIdentityIdColumnName(col.name));
 
   return (
     <div className="table-editor">
@@ -90,10 +164,10 @@ function TableEditor({ table, onUpdate, onDelete }: TableEditorProps) {
           <span style={{ width: 50 }}></span>
         </div>
         <div style={{ fontSize: 11, color: '#777', marginTop: 6, marginBottom: 8 }}>
-          Select multiple PK checkboxes to create a composite primary key.
+          `id` is auto-managed (`BIGINT GENERATED ALWAYS AS IDENTITY`) and hidden; select PK on your business columns to build a composite key with `id`.
         </div>
         
-        {columns.map((col, index) => (
+        {visibleColumns.map(({ col, index }) => (
           <div key={index} className="column-row">
             <input
               type="text"
@@ -165,6 +239,50 @@ export function DatabaseConfigModal({ isOpen, data, onSave, onClose, onCreateDat
   const [status, setStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [isCreating, setIsCreating] = useState(false);
 
+  const handleImportLayoutFile = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+
+    try {
+      const fileText = await file.text();
+      const parsed = JSON.parse(fileText);
+      const imported = extractImportedDatabaseLayout(parsed);
+
+      if (!imported || !imported.database) {
+        setStatus({
+          type: 'error',
+          message: 'Invalid layout file. Expected db-layout.json with at least one database entry.',
+        });
+        return;
+      }
+
+      const normalizedTables = (Array.isArray(imported.tables) ? imported.tables : []).map(toTableDefinition);
+
+      setFormData((prev) => ({
+        ...prev,
+        label: imported.label || prev.label || 'Database',
+        connectionName: imported.connectionName || prev.connectionName || 'default',
+        host: imported.host || prev.host || 'localhost',
+        port: Number(imported.port) || prev.port || 5432,
+        password: imported.password || prev.password || '',
+        database: imported.database || prev.database || '',
+        schema: imported.schema || prev.schema || 'public',
+        tables: normalizedTables,
+      }));
+
+      setStatus({
+        type: 'success',
+        message: `Imported layout from ${file.name}. Review and click Create Database or Save Configuration.`,
+      });
+    } catch (error) {
+      setStatus({
+        type: 'error',
+        message: error instanceof Error ? `Failed to import layout: ${error.message}` : 'Failed to import layout file',
+      });
+    }
+  };
+
   useEffect(() => {
     setFormData({
       label: data.label || 'Database',
@@ -188,9 +306,7 @@ export function DatabaseConfigModal({ isOpen, data, onSave, onClose, onCreateDat
         ...(formData.tables || []),
         {
           name: `table_${(formData.tables?.length || 0) + 1}`,
-          columns: [
-            { name: 'id', type: 'SERIAL', isPrimaryKey: true, isNullable: false },
-          ],
+          columns: [],
         },
       ],
     });
@@ -207,9 +323,32 @@ export function DatabaseConfigModal({ isOpen, data, onSave, onClose, onCreateDat
     setFormData({ ...formData, tables: updated });
   };
 
-  const handleSave = () => {
-    onSave(formData);
-    onClose();
+  const handleSave = async () => {
+    setIsCreating(true);
+    setStatus(null);
+
+    try {
+      // Persist node configuration first.
+      onSave(formData);
+
+      // Apply schema/config changes to PostgreSQL as part of save.
+      const result = await onCreateDatabase(formData);
+      setStatus({
+        type: result.success ? 'success' : 'error',
+        message: result.message,
+      });
+
+      if (result.success) {
+        onClose();
+      }
+    } catch (error) {
+      setStatus({
+        type: 'error',
+        message: error instanceof Error ? error.message : 'Failed to save database configuration',
+      });
+    } finally {
+      setIsCreating(false);
+    }
   };
 
   const handleCreateDatabase = async () => {
@@ -320,6 +459,19 @@ export function DatabaseConfigModal({ isOpen, data, onSave, onClose, onCreateDat
         
         <h3>
           Tables
+          <label
+            className="btn btn-secondary btn-small"
+            style={{ marginLeft: 10, cursor: 'pointer' }}
+            title="Import from datagateway/db-layout.json"
+          >
+            Import Layout JSON
+            <input
+              type="file"
+              accept="application/json,.json"
+              onChange={handleImportLayoutFile}
+              style={{ display: 'none' }}
+            />
+          </label>
           <button
             className="btn btn-secondary btn-small"
             onClick={addTable}
@@ -355,8 +507,8 @@ export function DatabaseConfigModal({ isOpen, data, onSave, onClose, onCreateDat
           >
             {isCreating ? 'Creating...' : 'Create Database'}
           </button>
-          <button className="btn btn-primary" onClick={handleSave}>
-            Save Configuration
+          <button className="btn btn-primary" onClick={handleSave} disabled={isCreating || !formData.database}>
+            {isCreating ? 'Saving...' : 'Save Configuration'}
           </button>
         </div>
       </div>

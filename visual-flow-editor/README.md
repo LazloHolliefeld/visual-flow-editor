@@ -10,8 +10,9 @@ A visual programming environment inspired by Unreal Engine 5 Blueprints. Design 
 - ✅ Two-level canvas navigation (Project → Service drill-down)
 - ✅ Breadcrumb navigation bar
 - ✅ Database node with table/schema designer
-- ✅ Composite primary keys supported (select multiple PK columns per table)
+- ✅ Hidden auto-managed `id` + composite PK support (`id` always included in PK)
 - ✅ API Service nodes with internal flow logic
+- ✅ Service toolbox `Define Request` modal for contract-first API design
 - ✅ Auto-generated DataGateway (REST/gRPC/GraphQL) from databases
 - ✅ Per-service GitHub repository pushing
 - ✅ Project persistence (auto-save)
@@ -26,6 +27,7 @@ A visual programming environment inspired by Unreal Engine 5 Blueprints. Design 
 - ⏳ Real-time code preview
 - ⏳ More node types for service logic
 - ⏳ Enhanced GraphQL/gRPC code generation
+- ⏳ Preview exact generated repo names in UI before pushing
 
 ## Architecture
 
@@ -37,20 +39,31 @@ Project Level (Main Canvas)
 
 Service Level (Drill-down Canvas)
 ├── Start/End nodes (⬭)
+├── Request nodes (📨) → Auto-derived from saved REST contracts, read-only in canvas
 ├── Action nodes (▭)
 ├── Decision nodes (◇)
 ├── Loop nodes (⬡)
 └── API Call nodes (▱)
+
+Canvas boundary rules:
+- Project canvas persists only `database`, `service`, and auto-generated `dataGateway` nodes.
+- Service canvas persists only service-logic nodes (`action`, `decision`, `loop`, `apiCall`, `startEnd`).
+- `request` nodes are derived UI nodes created from saved API contracts and are never persisted into the project canvas.
 ```
 
 ## Generated Repositories
 
-When you click "Generate & Push", separate repos are created:
+When you click "Generate & Push", separate repos are created with a project prefix:
 
 | Repo | Contents |
 |------|----------|
-| `datagateway` | Auto-generated CRUD API (REST/gRPC/GraphQL) + DB schemas |
-| `{service-name}` | Each API service you create gets its own repo |
+| `{project-name}_datagateway` | Auto-generated CRUD API (REST/gRPC/GraphQL) + DB schemas |
+| `{project-name}_{service-name}` | Each API service you create gets its own repo |
+
+## Request Templates
+
+- DataGateway request examples (fetch/insert/update/delete, joins, operators, batching):
+  - `docs/datagateway-request-templates.md`
 
 ## Maintainability Rule
 
@@ -82,19 +95,46 @@ Then open http://localhost:5173 in your browser.
 2. Configure host, port, postgres password, and database name
 3. Add tables with column definitions
 4. Click "Create Database" to provision in PostgreSQL
+5. Optional recovery flow: click `Import Layout JSON` and choose `datagateway/db-layout.json` to restore a saved layout instantly
+
+`id` column behavior is enforced automatically during create/save:
+- Each table gets an `id` column if missing.
+- `id` is enforced as `BIGINT GENERATED ALWAYS AS IDENTITY`.
+- `id` is always part of the table primary key.
+- Your selected business PK columns (for example `acctId`, `clientApp`) are kept and combined with `id` as a composite PK.
+- In the UI, `id` is hidden and cannot be customized.
+
+Database layout portability:
+- Generated DataGateway folders include `db-layout.json` with connection/table definitions.
+- Import that file from the Database modal to rebuild DB config after resets or accidental data loss.
 
 ### Creating an API Service
 1. Click "🔌 API Service" in the left panel
 2. Enter service name and description
 3. Double-click the node to drill down into its flow
-4. Add flow nodes (Action, Decision, Loop, API Call)
-5. Click "📁 Project" breadcrumb to go back
+4. Click `📝 Define Request` to define REST endpoint contracts (method, path, request fields, response fields)
+5. A `📨 Request` node appears inside the service canvas for each saved contract
+6. Add flow nodes (Action, Decision, Loop, API Call) if needed
+7. Click "📁 Project" breadcrumb to go back
+
+### Project Naming
+1. On the project canvas, click `✏️ Rename Project`
+2. Set the project name (default: `project`)
+3. Generate & Push will use this name as a repo prefix (for example `project_datagateway`, `project_createaccount`)
+
+Service contract behavior:
+- New service canvases start blank (no auto Start/End nodes)
+- Defined REST contracts are saved per service
+- Contract definitions are used to generate REST handler stubs plus GraphQL/gRPC stubs for service repos
 
 ### DataGateway (Auto-Generated)
 - Appears automatically when you add databases
+- Automatically creates/maintains visual connections from each Database node to DataGateway
 - Shows 🔒 AUTO badge (cannot be edited directly)
 - Double-click to view generated endpoints
 - Provides REST, gRPC, and GraphQL access to all tables
+- Insert requests reject client-provided `id` values and return inserted rows (including auto-generated `id`).
+- Update requests reject modifying `id`.
 
 ### Publishing
 Click "🚀 Generate & Push" to:
@@ -130,6 +170,11 @@ This drops all user databases, clears project state, and stops any running serve
   - Set the Database node password in Configure Database.
   - DataGateway uses, in order: `PGPASSWORD` env var, then node-configured password, then `postgres` fallback.
   - If password is unknown, reset the postgres user password and update the node config.
+
+- **Insert/Update fails when sending `id`**:
+  - DataGateway now protects identity PK columns.
+  - Do not send `id` in insert `values`; PostgreSQL generates it automatically.
+  - Do not include `id` in update `values`; use `searchCriteria` to target rows instead.
 
 ### Module export error on refresh
 ```
