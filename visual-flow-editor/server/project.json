@@ -1,8 +1,216 @@
 {
   "version": "2.0",
-  "savedAt": "2026-03-16T18:01:03.467Z",
+  "savedAt": "2026-03-17T01:50:40.986Z",
   "projectData": {
-    "projectNodes": [],
+    "projectNodes": [
+      {
+        "id": "database-1773710438033",
+        "type": "database",
+        "position": {
+          "x": 129.84397993232403,
+          "y": 127.45520286427126
+        },
+        "data": {
+          "label": "Database",
+          "connectionName": "default",
+          "host": "localhost",
+          "port": 5432,
+          "database": "myDB",
+          "schema": "public",
+          "tables": [
+            {
+              "name": "Account",
+              "columns": [
+                {
+                  "name": "id",
+                  "type": "SERIAL",
+                  "isPrimaryKey": true,
+                  "isNullable": false,
+                  "defaultValue": ""
+                },
+                {
+                  "name": "acctId",
+                  "type": "INTEGER",
+                  "isPrimaryKey": true,
+                  "isNullable": false,
+                  "defaultValue": ""
+                },
+                {
+                  "name": "appNum",
+                  "type": "INTEGER",
+                  "isPrimaryKey": true,
+                  "isNullable": false,
+                  "defaultValue": ""
+                },
+                {
+                  "name": "status",
+                  "type": "VARCHAR(255)",
+                  "isPrimaryKey": false,
+                  "isNullable": true,
+                  "defaultValue": ""
+                },
+                {
+                  "name": "customerId",
+                  "type": "INTEGER",
+                  "isPrimaryKey": false,
+                  "isNullable": true,
+                  "defaultValue": ""
+                }
+              ]
+            },
+            {
+              "name": "Customer",
+              "columns": [
+                {
+                  "name": "id",
+                  "type": "SERIAL",
+                  "isPrimaryKey": true,
+                  "isNullable": false,
+                  "defaultValue": ""
+                },
+                {
+                  "name": "CustomerId",
+                  "type": "INTEGER",
+                  "isPrimaryKey": true,
+                  "isNullable": true,
+                  "defaultValue": ""
+                },
+                {
+                  "name": "CustomerName",
+                  "type": "VARCHAR(255)",
+                  "isPrimaryKey": false,
+                  "isNullable": true,
+                  "defaultValue": ""
+                },
+                {
+                  "name": "CustomerType",
+                  "type": "VARCHAR(255)",
+                  "isPrimaryKey": false,
+                  "isNullable": true,
+                  "defaultValue": ""
+                }
+              ]
+            }
+          ]
+        },
+        "measured": {
+          "width": 100,
+          "height": 132
+        },
+        "selected": false,
+        "dragging": false
+      },
+      {
+        "id": "dataGateway",
+        "type": "dataGateway",
+        "position": {
+          "x": 297.49999999999994,
+          "y": 27.5
+        },
+        "data": {
+          "label": "DataGateway",
+          "databases": [
+            {
+              "name": "myDB",
+              "host": "localhost",
+              "port": 5432,
+              "tables": [
+                {
+                  "name": "Account",
+                  "columns": [
+                    {
+                      "name": "id",
+                      "type": "SERIAL",
+                      "isPrimaryKey": true,
+                      "isNullable": false,
+                      "defaultValue": ""
+                    },
+                    {
+                      "name": "acctId",
+                      "type": "INTEGER",
+                      "isPrimaryKey": true,
+                      "isNullable": false,
+                      "defaultValue": ""
+                    },
+                    {
+                      "name": "appNum",
+                      "type": "INTEGER",
+                      "isPrimaryKey": true,
+                      "isNullable": false,
+                      "defaultValue": ""
+                    },
+                    {
+                      "name": "status",
+                      "type": "VARCHAR(255)",
+                      "isPrimaryKey": false,
+                      "isNullable": true,
+                      "defaultValue": ""
+                    },
+                    {
+                      "name": "customerId",
+                      "type": "INTEGER",
+                      "isPrimaryKey": false,
+                      "isNullable": true,
+                      "defaultValue": ""
+                    }
+                  ]
+                },
+                {
+                  "name": "Customer",
+                  "columns": [
+                    {
+                      "name": "id",
+                      "type": "SERIAL",
+                      "isPrimaryKey": true,
+                      "isNullable": false,
+                      "defaultValue": ""
+                    },
+                    {
+                      "name": "CustomerId",
+                      "type": "INTEGER",
+                      "isPrimaryKey": true,
+                      "isNullable": true,
+                      "defaultValue": ""
+                    },
+                    {
+                      "name": "CustomerName",
+                      "type": "VARCHAR(255)",
+                      "isPrimaryKey": false,
+                      "isNullable": true,
+                      "defaultValue": ""
+                    },
+                    {
+                      "name": "CustomerType",
+                      "type": "VARCHAR(255)",
+                      "isPrimaryKey": false,
+                      "isNullable": true,
+                      "defaultValue": ""
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
+          "protocols": {
+            "rest": true,
+            "grpc": true,
+            "graphql": true
+          },
+          "isRunning": true,
+          "runUrls": {
+            "rest": "http://localhost:8080/api/",
+            "grpc": "localhost:50051",
+            "graphql": "http://localhost:8081/graphql"
+          }
+        },
+        "measured": {
+          "width": 238,
+          "height": 274
+        },
+        "selected": true,
+        "dragging": false
+      }
+    ],
     "projectEdges": [],
     "serviceFlows": {}
   }

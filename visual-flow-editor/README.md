@@ -10,6 +10,7 @@ A visual programming environment inspired by Unreal Engine 5 Blueprints. Design 
 - ✅ Two-level canvas navigation (Project → Service drill-down)
 - ✅ Breadcrumb navigation bar
 - ✅ Database node with table/schema designer
+- ✅ Composite primary keys supported (select multiple PK columns per table)
 - ✅ API Service nodes with internal flow logic
 - ✅ Auto-generated DataGateway (REST/gRPC/GraphQL) from databases
 - ✅ Per-service GitHub repository pushing
@@ -50,6 +51,13 @@ When you click "Generate & Push", separate repos are created:
 |------|----------|
 | `datagateway` | Auto-generated CRUD API (REST/gRPC/GraphQL) + DB schemas |
 | `{service-name}` | Each API service you create gets its own repo |
+
+## Maintainability Rule
+
+- Keep responsibilities separated by module.
+- Prefer small focused services/utilities over growing monolith files.
+- Reuse existing service functions before adding new inline logic in route/UI layers.
+- When a file starts owning multiple domains (for example DB ops + generation + process management), split by domain.
 
 ## Quick Start
 
@@ -244,7 +252,13 @@ visual-flow-editor/
 
 | File | Purpose |
 |------|---------|
-| `index.js` | Express API - DB ops, persistence, code gen, **local server management** |
+| `index.js` | Express API composition/root routes, persistence, generation orchestration, local server lifecycle |
+| `services/databaseService.js` | PostgreSQL responsibilities (connect/test/create/drop/list/reset/execute) |
+| `services/datagatewayGenerator.js` | DataGateway code generation templates and README generation |
+| `services/serviceCodeGenerator.js` | Service-level and project-level Go code generation helpers |
+| `services/githubService.js` | GitHub repository helpers plus push API orchestration |
+| `services/serverProcessService.js` | Local generated-server process lifecycle management |
+| `services/projectService.js` | Project state persistence (save/load/clear + migration handling) |
 | `project.json` | Auto-saved project state (stripped of callbacks) |
 
 ## API Endpoints Reference
@@ -314,6 +328,7 @@ dataGatewayUrls: { rest?: string, grpc?: string, graphql?: string } | null
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 2.9 | Mar 2026 | Fixed multi-key DB creation by generating composite PRIMARY KEY constraints when multiple PK columns are selected |
 | 2.8 | Mar 2026 | DataGateway generation moved to body-driven query endpoints (`/api/query/fetch|insert|update|delete`) with joins/operators/order/paging |
 | 2.7 | Mar 2026 | Unified delete pipeline: single delete and New Project share node-type side effects (DB drop) |
 | 2.6 | Mar 2026 | New Project now triggers backend reset-all so DB nodes deletion also drops PostgreSQL databases |

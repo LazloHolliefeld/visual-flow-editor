@@ -1,4 +1,61 @@
-package main
+function sanitizeIdentifier(name) {
+  return String(name || '')
+    .replace(/[^a-zA-Z0-9_]/g, '_')
+    .toLowerCase();
+}
+
+export function generateDataGateway(dbNodes) {
+  const databases = dbNodes.map(n => n.data);
+  const schemaMap = databases.map(db => {
+    const tables = (db.tables || []).map(table => {
+      const columns = (table.columns || [])
+        .filter(c => c && c.name)
+        .map(c => `"${c.name}": true`)
+        .join(', ');
+      return `		"${table.name}": { ${columns} },`;
+    }).join('\n');
+    return `	"${db.database}": {\n${tables}\n\t},`;
+  }).join('\n');
+  
+  const main = `package main
+
+import (
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+)
+
+func main() {
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+	
+	// Initialize database connections
+	initDB()
+	defer closeDB()
+	
+	// Start gRPC server in background
+	go startGRPCServer()
+	
+	// Start GraphQL server
+	go startGraphQLServer()
+	
+	// REST API routes
+	mux := http.NewServeMux()
+	registerRoutes(mux)
+	
+	fmt.Printf("DataGateway starting on :%s\\n", port)
+	fmt.Printf("  REST:    http://localhost:%s/api/\\n", port)
+	fmt.Printf("  gRPC:    localhost:50051\\n")
+	fmt.Printf("  GraphQL: http://localhost:8081/graphql\\n")
+	
+	log.Fatal(http.ListenAndServe(":"+port, mux))
+}
+`;
+
+  const handlers = `package main
 
 import (
   "database/sql"
@@ -6,6 +63,7 @@ import (
   "fmt"
   "log"
   "net/http"
+  "os"
   "regexp"
   "strings"
 
@@ -16,10 +74,7 @@ var dbConnections = make(map[string]*sql.DB)
 
 // allowedSchema[database][table][column] = true
 var allowedSchema = map[string]map[string]map[string]bool{
-	"myDB": {
-		"Account": { "id": true, "acctId": true, "appNum": true, "status": true, "customerId": true },
-		"Customer": { "id": true, "CustomerId": true, "CustomerName": true, "CustomerType": true },
-	},
+${schemaMap}
 }
 
 var identRe = regexp.MustCompile("^[A-Za-z_][A-Za-z0-9_]*$")
@@ -29,7 +84,7 @@ func isSafeIdentifier(v string) bool {
 }
 
 func quoteIdent(v string) string {
-  return "\"" + strings.ReplaceAll(v, "\"", "") + "\""
+  return "\\\"" + strings.ReplaceAll(v, "\\\"", "") + "\\\""
 }
 
 func tableExists(database, table string) bool {
@@ -132,16 +187,20 @@ type deletePayload struct {
 }
 
 func initDB() {
-
-  // Connect to myDB
-  connStrmydb := fmt.Sprintf("host=localhost port=5432 dbname=myDB user=postgres sslmode=disable")
-  dbmydb, err := sql.Open("postgres", connStrmydb)
-  if err != nil {
-    log.Printf("Warning: Failed to connect to myDB: %v", err)
-  } else {
-    dbConnections["myDB"] = dbmydb
+  dbPassword := os.Getenv("PGPASSWORD")
+  if dbPassword == "" {
+    dbPassword = "postgres"
   }
-
+${databases.map(db => `
+  // Connect to ${db.database}
+  connStr${sanitizeIdentifier(db.database)} := fmt.Sprintf("host=${db.host} port=${db.port} dbname=${db.database} user=postgres password=%s sslmode=disable", dbPassword)
+  db${sanitizeIdentifier(db.database)}, err := sql.Open("postgres", connStr${sanitizeIdentifier(db.database)})
+  if err != nil {
+    log.Printf("Warning: Failed to connect to ${db.database}: %v", err)
+  } else {
+    dbConnections["${db.database}"] = db${sanitizeIdentifier(db.database)}
+  }
+`).join('')}
 }
 
 func closeDB() {
@@ -770,3 +829,169 @@ func handleDelete(w http.ResponseWriter, r *http.Request) {
 
   writeJSON(w, http.StatusOK, map[string]interface{}{"success": true, "affected": affected})
 }
+`;
+
+  const grpc = `package main
+
+import (
+	"log"
+	"net"
+	
+	"google.golang.org/grpc"
+)
+
+func startGRPCServer() {
+	lis, err := net.Listen("tcp", ":50051")
+	if err != nil {
+		log.Printf("Failed to start gRPC server: %v", err)
+		return
+	}
+	
+	server := grpc.NewServer()
+	// Register services here
+	
+	log.Printf("gRPC server listening on :50051")
+	if err := server.Serve(lis); err != nil {
+		log.Printf("gRPC server error: %v", err)
+	}
+}
+`;
+
+  const graphql = `package main
+
+import (
+	"encoding/json"
+	"log"
+	"net/http"
+	
+	"github.com/graphql-go/graphql"
+)
+
+func startGraphQLServer() {
+	schema, err := graphql.NewSchema(graphql.SchemaConfig{
+		Query: graphql.NewObject(graphql.ObjectConfig{
+			Name: "Query",
+			Fields: graphql.Fields{
+				"health": &graphql.Field{
+					Type: graphql.String,
+					Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+						return "ok", nil
+					},
+				},
+				// Add more query fields for each table
+			},
+		}),
+	})
+	
+	if err != nil {
+		log.Printf("Failed to create GraphQL schema: %v", err)
+		return
+	}
+	
+	http.HandleFunc("/graphql", func(w http.ResponseWriter, r *http.Request) {
+		var params struct {
+			Query string \`json:"query"\`
+		}
+		json.NewDecoder(r.Body).Decode(&params)
+		
+		result := graphql.Do(graphql.Params{
+			Schema:        schema,
+			RequestString: params.Query,
+		})
+		
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(result)
+	})
+	
+	log.Printf("GraphQL server listening on :8081")
+	http.ListenAndServe(":8081", nil)
+}
+`;
+
+  const goMod = `module datagateway
+
+go 1.21
+
+require (
+	github.com/lib/pq v1.10.9
+	github.com/graphql-go/graphql v0.8.1
+	google.golang.org/grpc v1.59.0
+)
+`;
+
+  return { main, handlers, grpc, graphql, goMod };
+}
+
+// Helper: Generate DataGateway README
+export function generateDataGatewayReadme(dbNodes) {
+  return `# DataGateway
+
+Auto-generated data access layer with REST, gRPC, and GraphQL support.
+
+## Databases
+
+${dbNodes.map(n => `- **${n.data.database}** (${n.data.host}:${n.data.port})`).join('\n')}
+
+## Running
+
+\`\`\`bash
+go mod tidy
+go run .
+\`\`\`
+
+## Endpoints
+
+- REST: http://localhost:8080/api/
+- gRPC: localhost:50051
+- GraphQL: http://localhost:8081/graphql
+
+## REST API
+
+### Query Endpoints
+- POST /api/query/fetch
+- POST /api/query/insert
+- POST /api/query/update
+- POST /api/query/delete
+
+### Features
+- Body-driven requests (single or batch via \`requests\`)
+- Multi-table fetch with \`join\` / \`joins\` (INNER/LEFT/RIGHT)
+- Logical operators: \`and\`, \`or\`
+- Relational operators: \`eq\`, \`ne\`, \`gt\`, \`gte\`, \`lt\`, \`lte\`, \`like\`, \`ilike\`
+- Sorting and paging: \`orderBy\`, \`limit\`, \`offset\`
+
+### Example Fetch Payload
+\`\`\`json
+{
+  "database": "myDB",
+  "request": {
+    "name": "Account",
+    "searchCriteria": {
+      "clientNum": "2220",
+      "app": "1234",
+      "status": {
+        "logicalOp": "or",
+        "conditions": [
+          { "op": "eq", "value": "active" },
+          { "op": "eq", "value": "pending" }
+        ]
+      }
+    },
+    "retrieveFields": ["clientNum", "status", "app"],
+    "join": {
+      "table": "Customer",
+      "type": "inner",
+      "searchCriteria": {
+        "clientNum": "t0.clientNum",
+        "app": { "op": "gt", "ref": "t0.app" }
+      }
+    },
+    "orderBy": [
+      { "field": "t0.clientNum", "dir": "asc" }
+    ]
+  }
+}
+\`\`\`
+`;
+}
+

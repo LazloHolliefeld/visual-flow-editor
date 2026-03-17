@@ -89,6 +89,9 @@ function TableEditor({ table, onUpdate, onDelete }: TableEditorProps) {
           <span style={{ width: 30 }} title="Nullable">Null</span>
           <span style={{ width: 50 }}></span>
         </div>
+        <div style={{ fontSize: 11, color: '#777', marginTop: 6, marginBottom: 8 }}>
+          Select multiple PK checkboxes to create a composite primary key.
+        </div>
         
         {columns.map((col, index) => (
           <div key={index} className="column-row">

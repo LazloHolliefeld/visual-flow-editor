@@ -25,6 +25,13 @@ After making code changes, **always update documentation** if the change affects
    Invoke-RestMethod -Uri "http://localhost:3001/api/reset-all" -Method POST -ContentType "application/json" -Body '{}'
    ```
 
+## Maintainability Rule
+
+- Prefer separation of responsibilities.
+- Keep route wiring, database operations, code generation, and process management in separate modules/services.
+- Reuse service utilities rather than duplicating domain logic inline.
+- If one file starts owning multiple domains, split it before adding more features.
+
 ## Architecture Summary
 
 ### Two-Level Canvas System
@@ -41,7 +48,13 @@ Navigation: Breadcrumb at top (`📁 Project > 🔌 ServiceName`)
 | `src/services/nodeLifecycle.ts` | Shared node lifecycle logic (defaults, callback binding, callback stripping, delete-safe updates) |
 | `src/nodes/*.tsx` | Custom React Flow node components |
 | `src/components/*.tsx` | Modals and dialogs |
-| `server/index.js` | Express API (DB operations, persistence, code generation) |
+| `server/index.js` | Express API composition and route orchestration |
+| `server/services/databaseService.js` | PostgreSQL operations and reset logic |
+| `server/services/datagatewayGenerator.js` | DataGateway code/README generation |
+| `server/services/serviceCodeGenerator.js` | Flow/service Go code generation helpers |
+| `server/services/githubService.js` | GitHub repo/create/push helpers and push route orchestration |
+| `server/services/serverProcessService.js` | Start/stop/status lifecycle for generated local servers |
+| `server/services/projectService.js` | Save/load/clear project persistence helpers |
 | `server/project.json` | Auto-saved project state |
 
 ### Node Types
@@ -175,6 +188,7 @@ Edit `server/index.js`:
 8. **Database modal persistence** - ✅ FIXED: Form data now saved immediately on "Create Database" click before provisioning
 9. **Delete pipeline** - ✅ FIXED: Single-node delete and batch operations (New Project) unified; database nodes trigger `POST /api/db/drop`
 10. **DataGateway query contract** - ✅ DONE: Generated gateway uses body-driven query endpoints (`/api/query/fetch|insert|update|delete`) with joins, operators, and validation
+11. **Composite primary keys** - ✅ FIXED: Multiple PK checkboxes now generate a single table-level `PRIMARY KEY (col1, col2, ...)` constraint
 
 ## GitHub Repositories
 
