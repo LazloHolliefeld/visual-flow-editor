@@ -114,6 +114,7 @@ Click "🚀 Generate & Push" to:
 4. When running, shows green LIVE badge
 5. Click **⬇ URLs** to see REST/gRPC/GraphQL endpoints
 6. Click **⏹ Stop** to shut down the server
+7. Saving DB configuration or creating DB tables while running will auto-restart DataGateway to apply schema changes
 
 ## Testing / Reset
 

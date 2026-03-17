@@ -110,6 +110,52 @@ function App() {
   const saveTimeoutRef = useRef<number | null>(null);
   const isInitialLoadRef = useRef(true);
 
+  const buildProjectDataWithDbUpdate = useCallback((data: DatabaseNodeData): ProjectData => {
+    if (!selectedDbNode) return projectData;
+
+    const updateNodeData = (node: Node) => {
+      if (node.id !== selectedDbNode) return node;
+      return {
+        ...node,
+        data: { ...data },
+      };
+    };
+
+    return {
+      ...projectData,
+      projectNodes: projectData.projectNodes.map(updateNodeData),
+    };
+  }, [selectedDbNode, projectData]);
+
+  const restartDataGatewayIfRunning = useCallback(async (projectSnapshot: ProjectData) => {
+    if (!isDataGatewayRunning) return;
+
+    try {
+      await fetch(`${API_BASE}/api/server/stop-datagateway`, { method: 'POST' });
+
+      const dataToSend = stripCallbacks(projectSnapshot);
+      const response = await fetch(`${API_BASE}/api/server/start-datagateway`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectData: dataToSend }),
+      });
+      const result = await response.json();
+
+      if (result.success) {
+        setIsDataGatewayRunning(true);
+        setDataGatewayUrls(result.urls);
+      } else {
+        setIsDataGatewayRunning(false);
+        setDataGatewayUrls(null);
+        alert(`Failed to restart DataGateway after DB change: ${result.message}`);
+      }
+    } catch (error) {
+      setIsDataGatewayRunning(false);
+      setDataGatewayUrls(null);
+      alert(`Error restarting DataGateway after DB change: ${error instanceof Error ? error.message : 'Unknown'}`);
+    }
+  }, [isDataGatewayRunning]);
+
   // DataGateway Run/Stop handlers (defined early for use in effects)
   const handleRunDataGateway = useCallback(async () => {
     try {
@@ -579,7 +625,11 @@ function App() {
       ...prev,
       projectNodes: prev.projectNodes.map(updateNodeData),
     }));
-  }, [selectedDbNode, openDbConfigById, confirmDeleteNode]);
+
+    // Keep running DataGateway in sync with latest schema metadata.
+    const nextProjectData = buildProjectDataWithDbUpdate(data);
+    void restartDataGatewayIfRunning(nextProjectData);
+  }, [selectedDbNode, openDbConfigById, confirmDeleteNode, buildProjectDataWithDbUpdate, restartDataGatewayIfRunning]);
 
   // Save service config
   const handleSaveServiceConfig = useCallback((data: ServiceNodeData) => {
@@ -621,7 +671,16 @@ function App() {
           tables: data.tables,
         }),
       });
-      return await response.json();
+
+      const result = await response.json();
+
+      // If DataGateway is already running, refresh it after successful DB provisioning.
+      if (result.success) {
+        const nextProjectData = buildProjectDataWithDbUpdate(data);
+        void restartDataGatewayIfRunning(nextProjectData);
+      }
+
+      return result;
     } catch (error) {
       return { success: false, message: error instanceof Error ? error.message : 'Failed' };
     }

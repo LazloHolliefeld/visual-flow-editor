@@ -190,6 +190,7 @@ Edit `server/index.js`:
 10. **DataGateway query contract** - ✅ DONE: Generated gateway uses body-driven query endpoints (`/api/query/fetch|insert|update|delete`) with joins, operators, and validation
 11. **Composite primary keys** - ✅ FIXED: Multiple PK checkboxes now generate a single table-level `PRIMARY KEY (col1, col2, ...)` constraint
 12. **DataGateway DB auth** - ✅ FIXED: Generated DataGateway now tries `PGPASSWORD`, then node-configured DB password, then `postgres` fallback
+13. **DataGateway lifecycle sync** - ✅ FIXED: Stop now kills orphan processes on DataGateway ports; DB config save/create auto-restarts running DataGateway
 
 ## GitHub Repositories
 

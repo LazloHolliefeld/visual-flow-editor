@@ -3,6 +3,51 @@ import path from 'path';
 import { execSync, exec } from 'child_process';
 
 const runningServers = new Map(); // Map<serviceName, { process, pid, urls, startedAt }>
+const DATAGATEWAY_PORTS = [8080, 8081, 50051];
+
+function getListeningPidsByPorts(ports) {
+  try {
+    const output = execSync('netstat -ano -p tcp', {
+      shell: 'cmd.exe',
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+
+    const pids = new Set();
+    const portNeedles = ports.map((p) => `:${p}`);
+
+    for (const rawLine of output.split(/\r?\n/)) {
+      const line = rawLine.trim();
+      if (!line || !line.includes('LISTENING')) continue;
+      if (!portNeedles.some((needle) => line.includes(needle))) continue;
+
+      const parts = line.split(/\s+/);
+      const pid = Number(parts[parts.length - 1]);
+      if (Number.isInteger(pid) && pid > 0) {
+        pids.add(pid);
+      }
+    }
+
+    return [...pids];
+  } catch {
+    return [];
+  }
+}
+
+function killPidTree(pid) {
+  try {
+    execSync(`taskkill /PID ${pid} /T /F`, { shell: 'cmd.exe', stdio: 'ignore' });
+  } catch {
+    // Process may already be gone.
+  }
+}
+
+function killDataGatewayPortProcesses() {
+  const pids = getListeningPidsByPorts(DATAGATEWAY_PORTS);
+  for (const pid of pids) {
+    killPidTree(pid);
+  }
+}
 
 export function stopAllRunningServers() {
   for (const [name, server] of runningServers) {
@@ -15,6 +60,9 @@ export function stopAllRunningServers() {
       console.log(`Failed to stop ${name}:`, e.message);
     }
   }
+
+  // Also clean up orphan processes not tracked in memory.
+  killDataGatewayPortProcesses();
   runningServers.clear();
 }
 
@@ -28,6 +76,9 @@ export function getDataGatewayStatus() {
 }
 
 export async function startDataGateway({ projectData, generateDataGateway, gatewayDir }) {
+  // Ensure stale/orphan DataGateway instances are cleared before start.
+  killDataGatewayPortProcesses();
+
   if (runningServers.has('datagateway')) {
     return {
       success: false,
@@ -101,6 +152,9 @@ export async function startDataGateway({ projectData, generateDataGateway, gatew
 }
 
 export async function stopDataGateway() {
+  // Always kill by known ports first to remove orphaned instances.
+  killDataGatewayPortProcesses();
+
   const server = runningServers.get('datagateway');
   if (!server) {
     return {

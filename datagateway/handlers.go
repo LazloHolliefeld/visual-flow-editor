@@ -18,8 +18,8 @@ var dbConnections = make(map[string]*sql.DB)
 // allowedSchema[database][table][column] = true
 var allowedSchema = map[string]map[string]map[string]bool{
 	"myDB": {
-		"Account": { "id": true, "acctId": true, "appNum": true, "status": true, "customerId": true },
-		"Customer": { "id": true, "CustomerId": true, "CustomerName": true, "CustomerType": true },
+		"Account": { "id": true, "clientNum": true, "acctId": true, "app": true, "customerId": true, "status": true },
+		"Customer": { "id": true, "clientNum": true, "customerId": true, "customerName": true },
 	},
 }
 
