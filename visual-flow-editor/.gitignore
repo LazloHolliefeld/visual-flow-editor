@@ -22,3 +22,7 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Runtime project state (local only)
+server/project.json
+server/project.json.bak

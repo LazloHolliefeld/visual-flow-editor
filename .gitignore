@@ -1,0 +1,7 @@
+# Runtime/generated artifacts that should stay local
+/datagateway/*.exe
+/datagateway/*.log
+
+# Visual Flow Editor runtime state
+/visual-flow-editor/server/project.json
+/visual-flow-editor/server/project.json.bak
