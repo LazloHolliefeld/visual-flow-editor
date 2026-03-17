@@ -156,6 +156,7 @@ export function DatabaseConfigModal({ isOpen, data, onSave, onClose, onCreateDat
     connectionName: data.connectionName || 'default',
     host: data.host || 'localhost',
     port: data.port || 5432,
+    password: data.password || '',
     database: data.database || '',
     schema: data.schema || 'public',
     tables: data.tables || [],
@@ -170,6 +171,7 @@ export function DatabaseConfigModal({ isOpen, data, onSave, onClose, onCreateDat
       connectionName: data.connectionName || 'default',
       host: data.host || 'localhost',
       port: data.port || 5432,
+      password: data.password || '',
       database: data.database || '',
       schema: data.schema || 'public',
       tables: data.tables || [],
@@ -281,6 +283,19 @@ export function DatabaseConfigModal({ isOpen, data, onSave, onClose, onCreateDat
               onChange={(e) => setFormData({ ...formData, port: parseInt(e.target.value) || 5432 })}
             />
           </div>
+        </div>
+
+        <div className="form-row">
+          <div className="form-group">
+            <label>Postgres Password</label>
+            <input
+              type="password"
+              value={formData.password as string}
+              onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+              placeholder="postgres"
+            />
+          </div>
+          <div className="form-group"></div>
         </div>
         
         <div className="form-row">

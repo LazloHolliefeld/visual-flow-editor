@@ -615,6 +615,7 @@ function App() {
         body: JSON.stringify({
           host: data.host,
           port: data.port,
+          password: data.password,
           database: data.database,
           schema: data.schema,
           tables: data.tables,

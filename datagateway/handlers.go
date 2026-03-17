@@ -6,6 +6,7 @@ import (
   "fmt"
   "log"
   "net/http"
+  "os"
   "regexp"
   "strings"
 
@@ -132,9 +133,17 @@ type deletePayload struct {
 }
 
 func initDB() {
+  dbPasswordFromEnv := os.Getenv("PGPASSWORD")
 
   // Connect to myDB
-  connStrmydb := fmt.Sprintf("host=localhost port=5432 dbname=myDB user=postgres sslmode=disable")
+  dbPasswordmydb := "postgres"
+  if dbPasswordmydb == "" {
+    dbPasswordmydb = dbPasswordFromEnv
+  }
+  if dbPasswordmydb == "" {
+    dbPasswordmydb = "postgres"
+  }
+  connStrmydb := fmt.Sprintf("host=localhost port=5432 dbname=myDB user=postgres password=%s sslmode=disable", dbPasswordmydb)
   dbmydb, err := sql.Open("postgres", connStrmydb)
   if err != nil {
     log.Printf("Warning: Failed to connect to myDB: %v", err)

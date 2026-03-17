@@ -189,6 +189,7 @@ Edit `server/index.js`:
 9. **Delete pipeline** - ✅ FIXED: Single-node delete and batch operations (New Project) unified; database nodes trigger `POST /api/db/drop`
 10. **DataGateway query contract** - ✅ DONE: Generated gateway uses body-driven query endpoints (`/api/query/fetch|insert|update|delete`) with joins, operators, and validation
 11. **Composite primary keys** - ✅ FIXED: Multiple PK checkboxes now generate a single table-level `PRIMARY KEY (col1, col2, ...)` constraint
+12. **DataGateway DB auth** - ✅ FIXED: Generated DataGateway now tries `PGPASSWORD`, then node-configured DB password, then `postgres` fallback
 
 ## GitHub Repositories
 

@@ -30,6 +30,7 @@ export type ProjectNodeFactoryDeps = {
 export type DatabaseDropPayload = {
   host?: string;
   port?: number;
+  password?: string;
   database: string;
 };
 
@@ -55,7 +56,7 @@ export function getDefaultNodeData(type: string): Record<string, unknown> {
     case 'apiCall':
       return { label: 'API Call', url: '', method: 'GET' };
     case 'database':
-      return { label: 'Database', host: 'localhost', port: 5432, database: '', schema: 'public', tables: [] };
+      return { label: 'Database', host: 'localhost', port: 5432, password: '', database: '', schema: 'public', tables: [] };
     default:
       return { label: 'Node' };
   }
@@ -142,6 +143,7 @@ export function createProjectNode(
         label: 'Database',
         host: 'localhost',
         port: 5432,
+        password: '',
         database: '',
         schema: 'public',
         tables: [],
@@ -185,6 +187,7 @@ export function getDatabaseDropPayload(node: Node): DatabaseDropPayload | null {
   return {
     host: data.host || 'localhost',
     port: data.port || 5432,
+    password: data.password || '',
     database,
   };
 }

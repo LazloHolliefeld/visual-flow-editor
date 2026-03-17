@@ -187,13 +187,17 @@ type deletePayload struct {
 }
 
 func initDB() {
-  dbPassword := os.Getenv("PGPASSWORD")
-  if dbPassword == "" {
-    dbPassword = "postgres"
-  }
+  dbPasswordFromEnv := os.Getenv("PGPASSWORD")
 ${databases.map(db => `
   // Connect to ${db.database}
-  connStr${sanitizeIdentifier(db.database)} := fmt.Sprintf("host=${db.host} port=${db.port} dbname=${db.database} user=postgres password=%s sslmode=disable", dbPassword)
+  dbPassword${sanitizeIdentifier(db.database)} := ${JSON.stringify(db.password || '')}
+  if dbPassword${sanitizeIdentifier(db.database)} == "" {
+    dbPassword${sanitizeIdentifier(db.database)} = dbPasswordFromEnv
+  }
+  if dbPassword${sanitizeIdentifier(db.database)} == "" {
+    dbPassword${sanitizeIdentifier(db.database)} = "postgres"
+  }
+  connStr${sanitizeIdentifier(db.database)} := fmt.Sprintf("host=${db.host} port=${db.port} dbname=${db.database} user=postgres password=%s sslmode=disable", dbPassword${sanitizeIdentifier(db.database)})
   db${sanitizeIdentifier(db.database)}, err := sql.Open("postgres", connStr${sanitizeIdentifier(db.database)})
   if err != nil {
     log.Printf("Warning: Failed to connect to ${db.database}: %v", err)

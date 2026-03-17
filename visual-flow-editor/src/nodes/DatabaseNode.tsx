@@ -19,6 +19,7 @@ export interface DatabaseNodeData {
   connectionName?: string;
   host?: string;
   port?: number;
+  password?: string;
   database?: string;
   schema?: string;
   tables?: TableDefinition[];

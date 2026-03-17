@@ -79,7 +79,7 @@ Then open http://localhost:5173 in your browser.
 
 ### Creating a Database
 1. Click "⛁ Database" in the left panel
-2. Configure host, port, database name
+2. Configure host, port, postgres password, and database name
 3. Add tables with column definitions
 4. Click "Create Database" to provision in PostgreSQL
 
@@ -124,6 +124,11 @@ Invoke-RestMethod -Uri "http://localhost:3001/api/reset-all" -Method POST -Conte
 This drops all user databases, clears project state, and stops any running servers.
 
 ## Troubleshooting
+
+- **DataGateway auth failed (`password authentication failed for user postgres`)**:
+  - Set the Database node password in Configure Database.
+  - DataGateway uses, in order: `PGPASSWORD` env var, then node-configured password, then `postgres` fallback.
+  - If password is unknown, reset the postgres user password and update the node config.
 
 ### Module export error on refresh
 ```
